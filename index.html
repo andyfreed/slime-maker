@@ -738,9 +738,9 @@
 // ============================================================
 const SUPABASE_URL = 'https://xikissitwexetetaurnm.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpa2lzc2l0d2V4ZXRldGF1cm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMjE3MDksImV4cCI6MjA4NjY5NzcwOX0.RaoUV5pYIYZjQRHiFIOQd_8jaM3oAgzqtJkNgRlFczY';
-let supabase;
+let sb;
 try {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 } catch(e) {
   console.error('Supabase failed to load:', e);
   document.getElementById('authError').textContent = 'Could not connect. Check your internet and refresh!';
@@ -815,7 +815,7 @@ async function handleAuth() {
 
   errorEl.textContent = '';
 
-  if (!supabase) { errorEl.textContent = 'Not connected! Check internet and refresh the page.'; return; }
+  if (!sb) { errorEl.textContent = 'Not connected! Check internet and refresh the page.'; return; }
   if (!username || username.length < 2) { errorEl.textContent = 'Username must be at least 2 characters!'; return; }
   if (!/^[a-z0-9_]+$/.test(username)) { errorEl.textContent = 'Username: only letters, numbers, and underscores!'; return; }
   if (!password || password.length < 4) { errorEl.textContent = 'Password must be at least 4 characters!'; return; }
@@ -828,7 +828,7 @@ async function handleAuth() {
 
   try {
     if (authMode === 'signup') {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await sb.auth.signUp({
         email,
         password,
         options: { data: { username } }
@@ -843,7 +843,7 @@ async function handleAuth() {
       }
       showToast(`Welcome, ${username}!`);
     } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) {
         if (error.message.includes('Invalid login')) {
           errorEl.textContent = 'Wrong username or password!';
@@ -867,7 +867,7 @@ async function handleAuth() {
 
 async function logOut() {
   if (!confirm('Log out?')) return;
-  await supabase.auth.signOut();
+  await sb.auth.signOut();
   profile = null;
   slimes = [];
   document.getElementById('coinDisplay').style.display = 'none';
@@ -879,10 +879,10 @@ async function logOut() {
 // PROFILE / DATA
 // ============================================================
 async function loadProfile() {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await sb.auth.getUser();
   if (!user) return;
 
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('profiles')
     .select('*')
     .eq('id', user.id)
@@ -897,7 +897,7 @@ async function loadProfile() {
 
 async function saveProfile() {
   if (!profile) return;
-  const { error } = await supabase
+  const { error } = await sb
     .from('profiles')
     .update({
       coins: profile.coins,
@@ -911,7 +911,7 @@ async function saveProfile() {
 
 async function loadMySlimes() {
   if (!profile) return;
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('slimes')
     .select('*')
     .eq('user_id', profile.id)
@@ -922,7 +922,7 @@ async function loadMySlimes() {
 
 async function loadFriendsSlimes() {
   if (!profile) return [];
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('slimes')
     .select('*, profiles(username)')
     .neq('user_id', profile.id)
@@ -1089,7 +1089,7 @@ async function createSlime() {
   const name = document.getElementById('slimeName').value.trim() || 'Squishy';
 
   // Save to Supabase
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('slimes')
     .insert({
       user_id: profile.id,
@@ -1460,7 +1460,7 @@ async function deleteCurrentSlime() {
   if (!slime) return;
   if (!confirm(`Are you sure you want to delete ${slime.name}?`)) return;
 
-  const { error } = await supabase.from('slimes').delete().eq('id', currentSlimeId);
+  const { error } = await sb.from('slimes').delete().eq('id', currentSlimeId);
   if (error) { showToast('Could not delete slime!'); return; }
 
   slimes = slimes.filter(s => s.id !== currentSlimeId);
@@ -1633,9 +1633,9 @@ document.getElementById('authUsername').addEventListener('keydown', function(e) 
 // INIT — check if already logged in
 // ============================================================
 (async function init() {
-  if (!supabase) return;
+  if (!sb) return;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await sb.auth.getSession();
     if (session) {
       await loadProfile();
       if (profile) {
