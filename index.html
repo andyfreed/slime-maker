@@ -636,9 +636,9 @@
     <input type="text" class="auth-input" id="authUsername" placeholder="Username" maxlength="20" autocapitalize="off" autocorrect="off">
     <input type="password" class="auth-input" id="authPassword" placeholder="Password" maxlength="30">
     <div class="auth-error" id="authError"></div>
-    <button class="btn btn-pink" id="authBtn" onclick="handleAuth()">Log In</button>
+    <button class="btn btn-pink" id="authBtn">Log In</button>
     <div style="margin-top:15px;">
-      <button type="button" class="auth-switch" id="authSwitch" onclick="toggleAuthMode()">Don't have an account? Sign Up!</button>
+      <button type="button" class="auth-switch" id="authSwitch">Don't have an account? Sign Up!</button>
     </div>
   </div>
 </div>
@@ -1611,27 +1611,42 @@ function showToast(msg) {
 }
 
 // ============================================================
+// EVENT LISTENERS (no inline onclick — more reliable)
+// ============================================================
+document.getElementById('authSwitch').addEventListener('click', function() {
+  toggleAuthMode();
+});
+
+document.getElementById('authBtn').addEventListener('click', function() {
+  handleAuth();
+});
+
+document.getElementById('authPassword').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') handleAuth();
+});
+
+document.getElementById('authUsername').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('authPassword').focus();
+});
+
+// ============================================================
 // INIT — check if already logged in
 // ============================================================
 (async function init() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    await loadProfile();
-    if (profile) {
-      enterGame();
-      return;
+  if (!supabase) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await loadProfile();
+      if (profile) {
+        enterGame();
+        return;
+      }
     }
+  } catch(e) {
+    console.error('Init error:', e);
   }
-  // Show auth screen (already the default)
 })();
-
-// Allow Enter key on auth inputs
-document.getElementById('authPassword').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleAuth();
-});
-document.getElementById('authUsername').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('authPassword').focus();
-});
 </script>
 </body>
 </html>
