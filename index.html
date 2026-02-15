@@ -704,7 +704,7 @@
 
 <div class="coin-display" id="coinDisplay">0</div>
 <div class="user-display" id="userDisplay" onclick="logOut()"></div>
-<div class="overlay" id="overlay"></div>
+<div class="overlay" id="overlay" onclick="closeCoinPopup()"></div>
 
 <!-- COIN POPUP -->
 <div class="coin-popup" id="coinPopup">
@@ -1064,6 +1064,12 @@ function showScreenRaw(id) {
 function showScreen(id) {
   showScreenRaw(id);
   updateCoinDisplay();
+
+  // Dismiss any lingering overlays/popups/toasts
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('coinPopup').classList.remove('show');
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+  document.getElementById('toast').classList.remove('show');
 
   if (id === 'createScreen') initCreateScreen();
   if (id === 'collectionScreen') renderCollection();
@@ -1724,12 +1730,24 @@ async function buyItem(id, type, price) {
 // ============================================================
 // TOAST
 // ============================================================
+let _toastTimer = null;
 function showToast(msg) {
   const toast = document.getElementById('toast');
+  // Clear any existing timer so rapid calls don't cancel each other
+  if (_toastTimer) clearTimeout(_toastTimer);
   toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2500);
+  _toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    _toastTimer = null;
+  }, 2500);
 }
+// Tap toast to dismiss
+document.getElementById('toast').addEventListener('click', function() {
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = null;
+  this.classList.remove('show');
+});
 
 // ============================================================
 // EVENT LISTENERS (no inline onclick — more reliable)
