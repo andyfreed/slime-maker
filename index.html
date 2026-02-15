@@ -828,7 +828,8 @@ async function handleAuth() {
 
   try {
     if (authMode === 'signup') {
-      const { data, error } = await sb.auth.signUp({
+      // Sign up (don't use trigger — create profile manually)
+      const { data: signUpData, error } = await sb.auth.signUp({
         email,
         password,
         options: { data: { username } }
@@ -840,6 +841,26 @@ async function handleAuth() {
           errorEl.textContent = error.message;
         }
         return;
+      }
+
+      // Create the profile row ourselves
+      const userId = signUpData.user?.id;
+      if (userId) {
+        const { error: profileError } = await sb
+          .from('profiles')
+          .insert({
+            id: userId,
+            username: username,
+            coins: 0,
+            owned_colors: ['#55efc4','#74b9ff','#a29bfe','#fd79a8','#ffeaa7'],
+            owned_sparkles: ['none'],
+            owned_charms: ['none'],
+          });
+        if (profileError) {
+          console.error('Profile creation error:', profileError);
+          errorEl.textContent = 'Account created but profile failed. Try logging in!';
+          return;
+        }
       }
       showToast(`Welcome, ${username}!`);
     } else {
@@ -858,6 +879,7 @@ async function handleAuth() {
     await loadProfile();
     enterGame();
   } catch (e) {
+    console.error('Auth error:', e);
     errorEl.textContent = 'Something went wrong. Try again!';
   } finally {
     btn.disabled = false;
