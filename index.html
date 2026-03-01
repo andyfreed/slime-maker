@@ -17,6 +17,15 @@
 
   @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@600;700;800&display=swap');
 
+  :root {
+    --vh: 1vh;
+  }
+
+  input, button, select, textarea {
+    font-size: 16px;
+    touch-action: manipulation;
+  }
+
   html {
     height: -webkit-fill-available;
   }
@@ -26,6 +35,8 @@
     background: linear-gradient(135deg, #667eea, #764ba2, #f093fb, #f5576c);
     background-size: 400% 400%;
     animation: bgShift 15s ease infinite;
+    position: relative;
+    min-height: calc(var(--vh, 1vh) * 100);
     min-height: 100vh;
     min-height: -webkit-fill-available;
     overflow-x: hidden;
@@ -48,7 +59,62 @@
     100% { background-position: 0% 50%; }
   }
 
-  .screen { display: none; min-height: 100vh; min-height: -webkit-fill-available; padding: 20px; padding-bottom: calc(100px + env(safe-area-inset-bottom)); padding-top: calc(20px + env(safe-area-inset-top)); }
+  .fx-background {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .fx-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(2px) saturate(120%);
+    opacity: 0.55;
+    animation: orbFloat 16s ease-in-out infinite;
+    mix-blend-mode: screen;
+  }
+  .fx-orb.orb-a {
+    width: 44vw; height: 44vw; min-width: 220px; min-height: 220px;
+    left: -10vw; top: -8vh;
+    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.7), rgba(116,185,255,0.2) 50%, rgba(116,185,255,0.05) 70%, transparent 75%);
+    animation-duration: 18s;
+  }
+  .fx-orb.orb-b {
+    width: 52vw; height: 52vw; min-width: 260px; min-height: 260px;
+    right: -14vw; top: 24vh;
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.45), rgba(240,147,251,0.24) 52%, rgba(240,147,251,0.05) 74%, transparent 80%);
+    animation-duration: 21s;
+    animation-delay: -4s;
+  }
+  .fx-orb.orb-c {
+    width: 40vw; height: 40vw; min-width: 210px; min-height: 210px;
+    left: 28vw; bottom: -14vh;
+    background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.55), rgba(67,233,123,0.22) 52%, rgba(67,233,123,0.04) 74%, transparent 80%);
+    animation-duration: 17s;
+    animation-delay: -8s;
+  }
+  .fx-grid {
+    position: absolute;
+    inset: -20%;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 46px 46px;
+    opacity: 0.12;
+    transform: perspective(500px) rotateX(55deg) translateY(22vh);
+    animation: gridDrift 22s linear infinite;
+  }
+  @keyframes orbFloat {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(0, -18px, 0) scale(1.06); }
+  }
+  @keyframes gridDrift {
+    0% { transform: perspective(500px) rotateX(55deg) translateY(22vh) translateX(0); }
+    100% { transform: perspective(500px) rotateX(55deg) translateY(22vh) translateX(-46px); }
+  }
+
+  .screen { display: none; position: relative; z-index: 1; min-height: calc(var(--vh, 1vh) * 100); min-height: 100vh; min-height: -webkit-fill-available; padding: 20px; padding-bottom: calc(100px + env(safe-area-inset-bottom)); padding-top: calc(20px + env(safe-area-inset-top)); }
   .screen.active { display: flex; flex-direction: column; align-items: center; }
 
   h1 {
@@ -166,6 +232,7 @@
     text-align: center;
     box-shadow: 0 8px 32px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.2);
     border: 1px solid rgba(255,255,255,0.2);
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
   }
   .auth-container h2 { color: #fff; text-shadow: none; margin-bottom: 10px; }
   .auth-container p { color: rgba(255,255,255,0.75); font-weight: 600; margin-bottom: 20px; }
@@ -246,6 +313,53 @@
     animation: homeSlimeBounce 3s ease-in-out infinite;
     position: relative;
     filter: drop-shadow(0 10px 25px rgba(0,0,0,0.15));
+    border: 1px solid rgba(255,255,255,0.35);
+    box-shadow: inset 0 2px 12px rgba(255,255,255,0.25), inset 0 -10px 16px rgba(0,0,0,0.14);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .slime-blob {
+    border: 1px solid rgba(255,255,255,0.3);
+    overflow: hidden;
+    isolation: isolate;
+    box-shadow: inset 0 2px 12px rgba(255,255,255,0.22), inset 0 -10px 14px rgba(0,0,0,0.12);
+  }
+  .home-slime::before,
+  .play-slime::before,
+  .collection-card .mini-slime::before,
+  .slime-blob::before {
+    content: '';
+    position: absolute;
+    inset: -18% -25% 35% -25%;
+    background: radial-gradient(ellipse at center, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.2) 40%, rgba(255,255,255,0.02) 70%, transparent 78%);
+    mix-blend-mode: screen;
+    opacity: 0.75;
+    animation: slimeSpecularMove 6s ease-in-out infinite;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .home-slime::after,
+  .play-slime::after,
+  .collection-card .mini-slime::after,
+  .slime-blob::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(130% 100% at 50% 100%, rgba(0,0,0,0.2), transparent 52%),
+      radial-gradient(100% 60% at 50% 0%, rgba(255,255,255,0.22), transparent 45%);
+    opacity: 0.5;
+    animation: slimeDepthPulse 4.6s ease-in-out infinite;
+    z-index: 0;
+    pointer-events: none;
+  }
+  @keyframes slimeSpecularMove {
+    0%, 100% { transform: translateX(-8%) translateY(-3%) rotate(-6deg) scale(1); opacity: 0.65; }
+    50% { transform: translateX(12%) translateY(4%) rotate(5deg) scale(1.08); opacity: 0.92; }
+  }
+  @keyframes slimeDepthPulse {
+    0%, 100% { opacity: 0.42; }
+    50% { opacity: 0.65; }
   }
   .home-slime .eye {
     position: absolute;
@@ -254,6 +368,7 @@
     background: white;
     border-radius: 50%;
     top: 35%;
+    z-index: 3;
   }
   .home-slime .eye::after {
     content: '';
@@ -277,6 +392,7 @@
     bottom: 35%;
     left: 50%;
     transform: translateX(-50%);
+    z-index: 3;
   }
   @keyframes homeSlimeBounce {
     0%, 100% { transform: scaleX(1) scaleY(1); border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; }
@@ -387,7 +503,9 @@
     width: 100%;
     max-width: 500px;
     height: 400px;
-    background: rgba(255,255,255,0.08);
+    background:
+      radial-gradient(120% 120% at 50% 0%, rgba(255,255,255,0.16), rgba(255,255,255,0.04) 45%, rgba(0,0,0,0.08) 100%),
+      rgba(255,255,255,0.08);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-radius: 24px;
@@ -398,8 +516,38 @@
     overflow: hidden;
     margin: 15px 0;
     border: 1px solid rgba(255,255,255,0.15);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.22);
     touch-action: none;
+  }
+  .bubble-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .bubble {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: auto;
+    cursor: pointer;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.32) 42%, rgba(116,185,255,0.18) 70%, rgba(116,185,255,0.08) 86%, transparent 100%);
+    border: 1px solid rgba(255,255,255,0.45);
+    box-shadow: inset 0 2px 12px rgba(255,255,255,0.5), 0 8px 18px rgba(0,0,0,0.15);
+    animation: bubbleRise linear forwards;
+    touch-action: manipulation;
+  }
+  .bubble.pop {
+    animation: bubblePop 0.18s ease forwards !important;
+  }
+  @keyframes bubbleRise {
+    0% { transform: translateY(18px) scale(0.75); opacity: 0; }
+    8% { opacity: 1; }
+    100% { transform: translateY(-290px) scale(1.08); opacity: 0.2; }
+  }
+  @keyframes bubblePop {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.4); opacity: 0; }
   }
   .play-slime {
     width: 200px;
@@ -411,6 +559,9 @@
     will-change: transform, border-radius;
     touch-action: none;
     -webkit-touch-callout: none;
+    border: 1px solid rgba(255,255,255,0.3);
+    overflow: hidden;
+    isolation: isolate;
   }
   .play-slime:active { cursor: grabbing; }
   .play-slime .eye {
@@ -421,6 +572,7 @@
     border-radius: 50%;
     top: 30%;
     pointer-events: none;
+    z-index: 3;
   }
   .play-slime .eye .pupil {
     position: absolute;
@@ -446,6 +598,7 @@
     transform: translateX(-50%);
     pointer-events: none;
     transition: all 0.15s ease;
+    z-index: 3;
   }
   .play-slime .mouth.surprised {
     width: 20px;
@@ -473,10 +626,26 @@
     position: absolute;
     pointer-events: none;
     animation: sparkleFloat 1s ease forwards;
+    text-shadow: 0 0 12px rgba(255,255,255,0.65);
   }
   @keyframes sparkleFloat {
     0% { opacity: 1; transform: translate(0, 0) scale(1); }
     100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0); }
+  }
+  .goo-particle {
+    position: fixed;
+    pointer-events: none;
+    width: var(--size, 12px);
+    height: var(--size, 12px);
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.9), var(--goo-color, rgba(255,255,255,0.25)) 65%);
+    box-shadow: 0 0 16px var(--goo-color, rgba(255,255,255,0.2));
+    animation: gooFloat 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    z-index: 45;
+  }
+  @keyframes gooFloat {
+    0% { opacity: 0.95; transform: translate3d(0, 0, 0) scale(1); }
+    100% { opacity: 0; transform: translate3d(var(--tx), var(--ty), 0) scale(0.15); }
   }
 
   .play-info {
@@ -486,7 +655,62 @@
     text-align: center;
     text-shadow: 0 2px 8px rgba(0,0,0,0.1);
   }
+  .play-hud {
+    width: 100%;
+    max-width: 500px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 16px;
+    padding: 10px 14px;
+    margin-top: 6px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 24px rgba(0,0,0,0.12);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .play-hud-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: rgba(255,255,255,0.95);
+    font-weight: 800;
+    font-size: 0.95em;
+    gap: 10px;
+  }
+  .play-energy-track {
+    width: 100%;
+    height: 11px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.2);
+    overflow: hidden;
+    margin-top: 8px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .play-energy-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #74b9ff, #a29bfe, #f093fb);
+    box-shadow: 0 0 14px rgba(162,155,254,0.75);
+    transition: width 0.22s ease, box-shadow 0.22s ease;
+  }
+  .play-energy-fill.full {
+    background: linear-gradient(90deg, #ffeaa7, #fdcb6e, #f39c12);
+    box-shadow: 0 0 18px rgba(255,234,167,0.9);
+  }
+  .play-status {
+    margin-top: 8px;
+    color: rgba(255,255,255,0.9);
+    font-weight: 700;
+    font-size: 0.9em;
+    min-height: 1.2em;
+    text-align: center;
+  }
   .play-buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .play-buttons .btn:disabled {
+    opacity: 0.45;
+    filter: grayscale(0.25);
+  }
+  .btn-gold { background: linear-gradient(135deg, #ffeaa7, #fdcb6e, #f39c12); color: #fff; }
 
   /* COLLECTION SCREEN */
   .collection-grid {
@@ -521,6 +745,9 @@
     position: relative;
     margin: 5px 0;
     filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
+    border: 1px solid rgba(255,255,255,0.24);
+    overflow: hidden;
+    isolation: isolate;
   }
   .collection-card .mini-slime .eye {
     position: absolute;
@@ -529,6 +756,7 @@
     background: white;
     border-radius: 50%;
     top: 30%;
+    z-index: 3;
   }
   .collection-card .mini-slime .eye::after {
     content: '';
@@ -649,6 +877,7 @@
     top: 10%;
     right: 15%;
     animation: charmBob 2s ease-in-out infinite;
+    z-index: 4;
   }
   @keyframes charmBob {
     0%, 100% { transform: translateY(0) rotate(-5deg); }
@@ -662,6 +891,7 @@
     pointer-events: none;
     overflow: hidden;
     border-radius: inherit;
+    z-index: 2;
   }
   .slime-sparkle-dot {
     position: absolute;
@@ -701,9 +931,36 @@
     text-align: center;
   }
   .toast.show { transform: translateX(-50%) translateY(0); }
+
+  body.ios-keyboard-open #authScreen.active .auth-container {
+    transform: translateY(-14px) scale(0.985);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+
+  @media (max-height: 740px) {
+    .home-title { margin-top: 20px; font-size: 3em; }
+    .auth-container { padding: 26px 24px; }
+    .play-area { height: 340px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 </head>
 <body>
+
+<div class="fx-background" aria-hidden="true">
+  <div class="fx-orb orb-a"></div>
+  <div class="fx-orb orb-b"></div>
+  <div class="fx-orb orb-c"></div>
+  <div class="fx-grid"></div>
+</div>
 
 <div class="coin-display" id="coinDisplay">0</div>
 <div class="user-display" id="userDisplay" onclick="logOut()"></div>
@@ -724,9 +981,9 @@
   <h1 class="home-title" style="margin-top:60px;">Slime Maker!</h1>
   <div class="auth-container">
     <h2 id="authTitle">Who Is Playing?</h2>
-    <p id="authSubtitle">Type your name and 4-digit kid code. New names are made automatically.</p>
-    <input type="text" class="auth-input" id="authUsername" placeholder="Name" maxlength="20" autocapitalize="off" autocorrect="off">
-    <input type="password" class="auth-input" id="authPassword" placeholder="4-digit kid code" maxlength="4" inputmode="numeric" pattern="[0-9]*">
+    <p id="authSubtitle">Use the same name + 4-digit code on any device. New names are made automatically.</p>
+    <input type="text" class="auth-input" id="authUsername" placeholder="Name" maxlength="20" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username" enterkeyhint="next">
+    <input type="password" class="auth-input" id="authPassword" placeholder="4-digit kid code" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" enterkeyhint="go">
     <div class="auth-error" id="authError"></div>
     <button class="btn btn-pink" id="authBtn">Let's Play!</button>
   </div>
@@ -775,7 +1032,18 @@
 <div class="screen" id="playScreen">
   <button class="btn btn-back" onclick="showScreen('homeScreen')">Home</button>
   <p class="play-info" id="playSlimeName">Playing with Squishy!</p>
+  <div class="play-hud">
+    <div class="play-hud-top">
+      <span id="playMood">Mood: Chill</span>
+      <span id="playCombo">Combo x0</span>
+    </div>
+    <div class="play-energy-track">
+      <div class="play-energy-fill" id="playEnergyFill"></div>
+    </div>
+    <div class="play-status" id="playStatus">Charge up your slime for Mega Morph!</div>
+  </div>
   <div class="play-area" id="playArea">
+    <div class="bubble-layer" id="bubbleLayer"></div>
     <div class="play-slime" id="playSlime">
       <div class="eye left"><div class="pupil"></div></div>
       <div class="eye right"><div class="pupil"></div></div>
@@ -788,6 +1056,10 @@
     <button class="btn btn-pink btn-small" onclick="squishSlime()">Squish!</button>
     <button class="btn btn-green btn-small" onclick="stretchSlime()">Stretch!</button>
     <button class="btn btn-blue btn-small" onclick="bounceSlime()">Bounce!</button>
+  </div>
+  <div class="play-buttons" style="margin-top:5px;">
+    <button class="btn btn-gold btn-small" id="megaMorphBtn" onclick="triggerMegaMorph()" disabled>Mega Morph</button>
+    <button class="btn btn-purple btn-small" id="bubbleRushBtn" onclick="toggleBubbleRush()">Bubble Rush</button>
   </div>
   <div class="play-buttons" style="margin-top:5px;">
     <button class="btn btn-danger btn-small" id="deleteSlimeBtn" onclick="deleteCurrentSlime()">Delete Slime</button>
@@ -843,6 +1115,21 @@ let slimes = [];    // array from DB
 let currentSlimeId = null;
 let currentSlimeOwnerId = null; // track if viewing someone else's slime
 let createChoices = { color: '#55efc4', sparkle: 'none', charm: 'none' };
+let currentPlaySlime = null;
+let playSession = {
+  energy: 0,
+  combo: 0,
+  mood: 'Chill',
+  lastActionAt: 0,
+  bubbleRush: {
+    active: false,
+    popped: 0,
+    target: 12,
+    endsAt: 0,
+    spawnTimer: null,
+    countdownTimer: null,
+  },
+};
 
 // All available items
 const ALL_COLORS = [
@@ -1023,6 +1310,7 @@ async function handleAuth() {
 
 async function logOut() {
   if (!confirm('Switch to a different player?')) return;
+  cleanupPlayEffects();
   await sb.auth.signOut();
   profile = null;
   slimes = [];
@@ -1032,7 +1320,7 @@ async function logOut() {
   document.getElementById('authPassword').value = '';
   document.getElementById('authError').textContent = '';
   document.getElementById('authTitle').textContent = 'Who Is Playing?';
-  document.getElementById('authSubtitle').textContent = 'Type your name and 4-digit kid code. New names are made automatically.';
+  document.getElementById('authSubtitle').textContent = 'Use the same name + 4-digit code on any device. New names are made automatically.';
   document.getElementById('authBtn').textContent = "Let's Play!";
   showScreenRaw('authScreen');
 }
@@ -1104,6 +1392,11 @@ function showScreenRaw(id) {
 }
 
 function showScreen(id) {
+  const active = document.querySelector('.screen.active');
+  if (active && active.id === 'playScreen' && id !== 'playScreen') {
+    cleanupPlayEffects();
+  }
+
   showScreenRaw(id);
   updateCoinDisplay();
 
@@ -1129,7 +1422,9 @@ function enterGame() {
 }
 
 function updateCoinDisplay() {
-  if (profile) document.getElementById('coinDisplay').textContent = '∞';
+  if (!profile) return;
+  const value = Number.isFinite(profile.coins) ? profile.coins : 0;
+  document.getElementById('coinDisplay').textContent = String(value);
 }
 
 // ============================================================
@@ -1229,15 +1524,15 @@ function buildSlimeHTML(color, sparkle, charm, w, h) {
   const pupilSize = Math.round(eyeW * 0.55);
 
   return `
-    <div style="width:${w}px;height:${h}px;background:radial-gradient(circle at 35% 35%, ${lightenColor(color, 30)}, ${color});border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;position:relative;filter:drop-shadow(0 8px 15px rgba(0,0,0,0.15));">
-      <div class="slime-sparkles">${sparklesHTML}</div>
-      <div style="position:absolute;width:${eyeW}px;height:${eyeH}px;background:white;border-radius:50%;top:32%;left:28%;">
+    <div class="slime-blob" style="width:${w}px;height:${h}px;background:radial-gradient(circle at 35% 35%, ${lightenColor(color, 30)}, ${color});border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;position:relative;filter:drop-shadow(0 8px 15px rgba(0,0,0,0.15));">
+      <div class="slime-sparkles" style="z-index:2;">${sparklesHTML}</div>
+      <div style="position:absolute;width:${eyeW}px;height:${eyeH}px;background:white;border-radius:50%;top:32%;left:28%;z-index:3;">
         <div style="position:absolute;width:${pupilSize}px;height:${pupilSize}px;background:#2d3436;border-radius:50%;bottom:4px;left:50%;transform:translateX(-50%);"></div>
       </div>
-      <div style="position:absolute;width:${eyeW}px;height:${eyeH}px;background:white;border-radius:50%;top:32%;right:28%;">
+      <div style="position:absolute;width:${eyeW}px;height:${eyeH}px;background:white;border-radius:50%;top:32%;right:28%;z-index:3;">
         <div style="position:absolute;width:${pupilSize}px;height:${pupilSize}px;background:#2d3436;border-radius:50%;bottom:4px;left:50%;transform:translateX(-50%);"></div>
       </div>
-      <div style="position:absolute;width:${Math.round(w*0.16)}px;height:${Math.round(h*0.09)}px;border-bottom:3px solid #2d3436;border-radius:0 0 50% 50%;bottom:30%;left:50%;transform:translateX(-50%);"></div>
+      <div style="position:absolute;width:${Math.round(w*0.16)}px;height:${Math.round(h*0.09)}px;border-bottom:3px solid #2d3436;border-radius:0 0 50% 50%;bottom:30%;left:50%;transform:translateX(-50%);z-index:3;"></div>
       ${charmHTML}
     </div>
   `;
@@ -1249,6 +1544,276 @@ function lightenColor(hex, percent) {
   const g = Math.min(255, ((num >> 8) & 0x00FF) + Math.round(255 * percent / 100));
   const b = Math.min(255, (num & 0x0000FF) + Math.round(255 * percent / 100));
   return `rgb(${r},${g},${b})`;
+}
+
+function getCurrentSlimeData() {
+  if (currentPlaySlime) return currentPlaySlime;
+  let slime = slimes.find(s => s.id === currentSlimeId);
+  if (!slime) slime = friendsSlimesCache.find(s => s.id === currentSlimeId);
+  return slime || null;
+}
+
+function cleanupPlayEffects() {
+  if (playCleanup) {
+    playCleanup();
+    playCleanup = null;
+  }
+  stopPlayEnergyDecay();
+  endBubbleRush(false, true);
+  currentPlaySlime = null;
+}
+
+function resetPlaySession() {
+  playSession.energy = 0;
+  playSession.combo = 0;
+  playSession.mood = 'Chill';
+  playSession.lastActionAt = 0;
+  endBubbleRush(false, true);
+  startPlayEnergyDecay();
+  updatePlayHud('Charge up your slime for Mega Morph!');
+}
+
+function updatePlayMood() {
+  if (playSession.energy >= 100) playSession.mood = 'Legendary';
+  else if (playSession.energy >= 75) playSession.mood = 'Hyper';
+  else if (playSession.energy >= 45) playSession.mood = 'Playful';
+  else if (playSession.energy >= 20) playSession.mood = 'Happy';
+  else playSession.mood = 'Chill';
+}
+
+function updatePlayHud(statusText) {
+  const energyFill = document.getElementById('playEnergyFill');
+  const moodEl = document.getElementById('playMood');
+  const comboEl = document.getElementById('playCombo');
+  const statusEl = document.getElementById('playStatus');
+  const megaBtn = document.getElementById('megaMorphBtn');
+  const bubbleBtn = document.getElementById('bubbleRushBtn');
+  if (!energyFill || !moodEl || !comboEl || !statusEl || !megaBtn || !bubbleBtn) return;
+
+  updatePlayMood();
+  energyFill.style.width = `${playSession.energy}%`;
+  energyFill.classList.toggle('full', playSession.energy >= 100);
+
+  moodEl.textContent = `Mood: ${playSession.mood}`;
+  comboEl.textContent = `Combo x${playSession.combo}`;
+  megaBtn.disabled = playSession.energy < 100;
+  bubbleBtn.textContent = playSession.bubbleRush.active ? 'Stop Bubble Rush' : 'Bubble Rush';
+
+  if (statusText) {
+    statusEl.textContent = statusText;
+    return;
+  }
+  if (playSession.bubbleRush.active) {
+    const remainingMs = Math.max(0, playSession.bubbleRush.endsAt - Date.now());
+    const sec = Math.ceil(remainingMs / 1000);
+    statusEl.textContent = `Bubble Rush: ${playSession.bubbleRush.popped}/${playSession.bubbleRush.target} • ${sec}s`;
+  } else if (playSession.energy >= 100) {
+    statusEl.textContent = 'Mega Morph ready! Tap the gold button.';
+  } else {
+    statusEl.textContent = 'Keep playing to charge Mega Morph.';
+  }
+}
+
+function registerPlayAction(kind, baseGain) {
+  const gainBase = Number.isFinite(baseGain) ? baseGain : 8;
+  const now = Date.now();
+  const elapsed = now - playSession.lastActionAt;
+  playSession.combo = elapsed < 1700 ? Math.min(playSession.combo + 1, 99) : 1;
+  playSession.lastActionAt = now;
+
+  const comboBonus = Math.min(12, Math.floor(playSession.combo / 3));
+  playSession.energy = Math.min(100, playSession.energy + gainBase + comboBonus);
+
+  if (kind === 'bubble') updatePlayHud();
+  else if (kind === 'drag') updatePlayHud('Sliiiime stretch!');
+  else updatePlayHud();
+}
+
+let playEnergyDecayTimer = null;
+function startPlayEnergyDecay() {
+  stopPlayEnergyDecay();
+  playEnergyDecayTimer = setInterval(() => {
+    const playScreen = document.getElementById('playScreen');
+    if (!playScreen || !playScreen.classList.contains('active')) return;
+    if (playSession.bubbleRush.active) return;
+    if (Date.now() - playSession.lastActionAt < 1400) return;
+    if (playSession.energy <= 0) return;
+
+    playSession.energy = Math.max(0, playSession.energy - 1);
+    updatePlayHud();
+  }, 850);
+}
+
+function stopPlayEnergyDecay() {
+  if (!playEnergyDecayTimer) return;
+  clearInterval(playEnergyDecayTimer);
+  playEnergyDecayTimer = null;
+}
+
+function clearBubbleRushBubbles() {
+  const layer = document.getElementById('bubbleLayer');
+  if (!layer) return;
+  layer.innerHTML = '';
+}
+
+function spawnBubbleRushBubble() {
+  if (!playSession.bubbleRush.active) return;
+  const layer = document.getElementById('bubbleLayer');
+  const area = document.getElementById('playArea');
+  if (!layer || !area) return;
+
+  const size = 24 + Math.random() * 44;
+  const maxX = Math.max(10, area.clientWidth - size - 10);
+  const bubble = document.createElement('button');
+  bubble.type = 'button';
+  bubble.className = 'bubble';
+  bubble.style.width = `${size}px`;
+  bubble.style.height = `${size}px`;
+  bubble.style.left = `${10 + Math.random() * maxX}px`;
+  bubble.style.bottom = '-26px';
+  bubble.style.animationDuration = `${2.5 + Math.random() * 1.8}s`;
+
+  const pop = (e) => {
+    if (e) e.preventDefault();
+    if (bubble.dataset.popped) return;
+    bubble.dataset.popped = '1';
+    bubble.classList.add('pop');
+
+    const rect = bubble.getBoundingClientRect();
+    spawnParticle(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    registerPlayAction('bubble', 9);
+    playSession.bubbleRush.popped += 1;
+    updatePlayHud();
+
+    setTimeout(() => bubble.remove(), 170);
+    if (playSession.bubbleRush.popped >= playSession.bubbleRush.target) {
+      endBubbleRush(true);
+    }
+  };
+
+  bubble.addEventListener('click', pop);
+  bubble.addEventListener('touchstart', pop, { passive: false });
+  bubble.addEventListener('animationend', () => {
+    if (!bubble.dataset.popped && bubble.parentNode) bubble.remove();
+  });
+  layer.appendChild(bubble);
+}
+
+async function awardCoins(amount, reason) {
+  if (!profile || !Number.isFinite(amount) || amount <= 0) return;
+  profile.coins = Number.isFinite(profile.coins) ? profile.coins : 0;
+  profile.coins += amount;
+  updateCoinDisplay();
+  await saveProfile();
+  if (reason) showToast(`${reason} +${amount} coins!`);
+}
+
+async function endBubbleRush(success, silent) {
+  if (playSession.bubbleRush.spawnTimer) {
+    clearInterval(playSession.bubbleRush.spawnTimer);
+    playSession.bubbleRush.spawnTimer = null;
+  }
+  if (playSession.bubbleRush.countdownTimer) {
+    clearInterval(playSession.bubbleRush.countdownTimer);
+    playSession.bubbleRush.countdownTimer = null;
+  }
+
+  const wasActive = playSession.bubbleRush.active;
+  playSession.bubbleRush.active = false;
+  clearBubbleRushBubbles();
+
+  if (!wasActive) {
+    updatePlayHud();
+    return;
+  }
+
+  if (success) {
+    playSession.energy = Math.min(100, playSession.energy + 18);
+    if (currentSlimeOwnerId === profile?.id) {
+      await awardCoins(15, 'Bubble Rush clear!');
+    } else if (!silent) {
+      showToast('Bubble Rush clear!');
+    }
+  } else if (!silent) {
+    showToast('Bubble Rush over! Try again.');
+  }
+  updatePlayHud();
+}
+
+function startBubbleRush() {
+  if (playSession.bubbleRush.active) return;
+
+  playSession.bubbleRush.active = true;
+  playSession.bubbleRush.popped = 0;
+  playSession.bubbleRush.target = 12;
+  playSession.bubbleRush.endsAt = Date.now() + 20000;
+
+  updatePlayHud('Bubble Rush started! Pop 12 bubbles.');
+  for (let i = 0; i < 4; i++) spawnBubbleRushBubble();
+
+  playSession.bubbleRush.spawnTimer = setInterval(() => {
+    spawnBubbleRushBubble();
+    if (Math.random() < 0.35) spawnBubbleRushBubble();
+  }, 540);
+
+  playSession.bubbleRush.countdownTimer = setInterval(() => {
+    const remaining = playSession.bubbleRush.endsAt - Date.now();
+    if (remaining <= 0) {
+      endBubbleRush(playSession.bubbleRush.popped >= playSession.bubbleRush.target);
+      return;
+    }
+    updatePlayHud();
+  }, 200);
+}
+
+function toggleBubbleRush() {
+  if (playSession.bubbleRush.active) {
+    endBubbleRush(false, true);
+    showToast('Bubble Rush stopped.');
+    return;
+  }
+  startBubbleRush();
+}
+
+async function triggerMegaMorph() {
+  const s = getSlimeEl();
+  if (!s) return;
+  if (playSession.energy < 100) {
+    showToast('Charge to 100% first!');
+    return;
+  }
+
+  const rect = s.getBoundingClientRect();
+  for (let i = 0; i < 8; i++) {
+    const px = rect.left + rect.width / 2 + (Math.random() * 90 - 45);
+    const py = rect.top + rect.height / 2 + (Math.random() * 90 - 45);
+    spawnParticle(px, py);
+  }
+
+  s.querySelector('.mouth').classList.add('happy');
+  s.style.transition = 'transform 0.16s ease, border-radius 0.16s ease, filter 0.16s ease';
+  s.style.transform = 'translate(-50%, -50%) scaleX(1.35) scaleY(0.7)';
+  s.style.borderRadius = '45% 45% 50% 50% / 35% 35% 65% 65%';
+  s.style.filter = 'drop-shadow(0 14px 30px rgba(0,0,0,0.22)) saturate(1.35) brightness(1.1)';
+
+  setTimeout(() => {
+    s.style.transition = 'transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-radius 0.55s ease, filter 0.4s ease';
+    s.style.transform = 'translate(-50%, -50%) scaleX(1) scaleY(1)';
+    s.style.borderRadius = '50% 50% 50% 50% / 60% 60% 40% 40%';
+    s.style.filter = 'drop-shadow(0 10px 20px rgba(0,0,0,0.15))';
+    s.querySelector('.mouth').classList.remove('happy');
+  }, 180);
+
+  playSession.energy = 24;
+  playSession.combo = 0;
+  playSession.lastActionAt = Date.now();
+  updatePlayHud('Mega Morph unleashed!');
+
+  if (currentSlimeOwnerId === profile?.id) {
+    await awardCoins(5, 'Mega Morph');
+  } else {
+    showToast('Mega Morph!');
+  }
 }
 
 // ============================================================
@@ -1310,6 +1875,8 @@ function openPlayScreen(slimeId, ownerId) {
 
   currentSlimeId = slimeId;
   currentSlimeOwnerId = ownerId || profile.id;
+  currentPlaySlime = slime;
+  resetPlaySession();
 
   // Show/hide delete button based on ownership
   const deleteBtn = document.getElementById('deleteSlimeBtn');
@@ -1323,6 +1890,8 @@ function openPlayScreen(slimeId, ownerId) {
 
   const ps = document.getElementById('playSlime');
   ps.style.background = `radial-gradient(circle at 35% 35%, ${lightenColor(slime.color, 30)}, ${slime.color})`;
+  ps.style.boxShadow = `inset 0 2px 14px ${lightenColor(slime.color, 45)}, inset 0 -12px 18px rgba(0,0,0,0.18), 0 14px 22px rgba(0,0,0,0.16)`;
+  ps.style.borderColor = lightenColor(slime.color, 55);
   ps.style.width = '200px';
   ps.style.height = '170px';
   ps.style.borderRadius = '50% 50% 50% 50% / 60% 60% 40% 40%';
@@ -1334,6 +1903,7 @@ function openPlayScreen(slimeId, ownerId) {
   mouth.classList.remove('surprised', 'happy');
 
   ps.querySelectorAll('.slime-sparkles, .charm-on-slime').forEach(el => el.remove());
+  clearBubbleRushBubbles();
 
   const sparkleData = ALL_SPARKLES.find(s => s.id === slime.sparkle);
   if (slime.sparkle !== 'none' && sparkleData) {
@@ -1428,6 +1998,7 @@ function setupPlayInteraction() {
     applyTransform(slimeX, slimeY, 1.08, 0.88, '50% 50% 50% 50% / 45% 45% 55% 55%');
     setMouth('surprised');
     spawnParticle(pos.x, pos.y);
+    registerPlayAction('drag', 5);
   }
 
   function onMove(e) {
@@ -1464,6 +2035,7 @@ function setupPlayInteraction() {
     if (!isDragging) return;
     isDragging = false;
     setMouth('happy');
+    registerPlayAction('drag', 7);
 
     jiggling = true;
     const returnX = slimeX, returnY = slimeY;
@@ -1503,9 +2075,10 @@ function setupPlayInteraction() {
   document.addEventListener('touchmove', onMove, { passive: false });
   document.addEventListener('touchend', onUp);
 
-  playArea.addEventListener('mousemove', (e) => {
+  function onHoverMove(e) {
     if (!isDragging) movePupils(e.clientX, e.clientY);
-  });
+  }
+  playArea.addEventListener('mousemove', onHoverMove);
 
   playCleanup = () => {
     playArea.removeEventListener('mousedown', onDown);
@@ -1514,6 +2087,7 @@ function setupPlayInteraction() {
     playArea.removeEventListener('touchstart', onDown);
     document.removeEventListener('touchmove', onMove);
     document.removeEventListener('touchend', onUp);
+    playArea.removeEventListener('mousemove', onHoverMove);
     if (animFrame) cancelAnimationFrame(animFrame);
   };
 
@@ -1522,14 +2096,13 @@ function setupPlayInteraction() {
 }
 
 function spawnParticle(x, y) {
-  // Find the slime data from either our slimes or friends cache
-  let cs = slimes.find(s => s.id === currentSlimeId);
-  if (!cs) cs = friendsSlimesCache.find(s => s.id === currentSlimeId);
+  const cs = getCurrentSlimeData();
   if (!cs) return;
   const sparkleData = ALL_SPARKLES.find(s => s.id === cs.sparkle);
   const emoji = sparkleData && sparkleData.emoji ? sparkleData.emoji : '✨';
+  const gooColor = sparkleData && sparkleData.color ? sparkleData.color : lightenColor(cs.color, 20);
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const p = document.createElement('div');
     p.className = 'sparkle-particle';
     p.textContent = emoji;
@@ -1542,6 +2115,19 @@ function spawnParticle(x, y) {
     p.style.zIndex = '50';
     document.body.appendChild(p);
     setTimeout(() => p.remove(), 1000);
+
+    if (Math.random() < 0.8) {
+      const g = document.createElement('div');
+      g.className = 'goo-particle';
+      g.style.left = x + 'px';
+      g.style.top = y + 'px';
+      g.style.setProperty('--size', (8 + Math.random() * 12) + 'px');
+      g.style.setProperty('--tx', (Math.random() * 110 - 55) + 'px');
+      g.style.setProperty('--ty', (Math.random() * -85 - 25) + 'px');
+      g.style.setProperty('--goo-color', gooColor);
+      document.body.appendChild(g);
+      setTimeout(() => g.remove(), 900);
+    }
   }
 }
 
@@ -1550,6 +2136,7 @@ function getSlimeEl() { return document.getElementById('playSlime'); }
 
 function pokeSlime() {
   const s = getSlimeEl(); if (!s) return;
+  registerPlayAction('poke', 10);
   s.querySelector('.mouth').classList.add('surprised');
   s.style.transition = 'transform 0.1s ease, border-radius 0.1s ease';
   s.style.transform = `translate(-50%, -50%) scaleX(0.85) scaleY(1.12)`;
@@ -1566,6 +2153,7 @@ function pokeSlime() {
 
 function squishSlime() {
   const s = getSlimeEl(); if (!s) return;
+  registerPlayAction('squish', 12);
   s.querySelector('.mouth').classList.add('surprised');
   s.style.transition = 'transform 0.15s ease, border-radius 0.15s ease';
   s.style.transform = `translate(-50%, -50%) scaleX(1.4) scaleY(0.6)`;
@@ -1582,6 +2170,7 @@ function squishSlime() {
 
 function stretchSlime() {
   const s = getSlimeEl(); if (!s) return;
+  registerPlayAction('stretch', 11);
   s.querySelector('.mouth').classList.add('surprised');
   s.style.transition = 'transform 0.2s ease, border-radius 0.2s ease';
   s.style.transform = `translate(-50%, -50%) scaleX(0.65) scaleY(1.5)`;
@@ -1600,6 +2189,7 @@ function stretchSlime() {
 
 function bounceSlime() {
   const s = getSlimeEl(); if (!s) return;
+  registerPlayAction('bounce', 13);
   s.querySelector('.mouth').classList.add('happy');
   let step = 0;
   const bounce = () => {
@@ -1723,7 +2313,8 @@ function renderShopSection(containerId, items, ownedList, type) {
 
   items.forEach(item => {
     const owned = ownedList.includes(item.id);
-    const canAfford = true; // unlimited coins for testing
+    const balance = Number.isFinite(profile?.coins) ? profile.coins : 0;
+    const canAfford = balance >= item.price;
     const div = document.createElement('div');
     div.className = 'shop-item' + (owned ? ' owned' : '');
 
@@ -1750,8 +2341,25 @@ function renderShopSection(containerId, items, ownedList, type) {
 }
 
 async function buyItem(id, type, price) {
-  // Unlimited coins for testing — skip balance check
-  // profile.coins -= price;
+  if (!profile) return;
+  const ownedList = type === 'color'
+    ? profile.owned_colors
+    : type === 'sparkle'
+      ? profile.owned_sparkles
+      : profile.owned_charms;
+
+  if (ownedList.includes(id)) {
+    showToast('You already own that one!');
+    return;
+  }
+
+  const balance = Number.isFinite(profile.coins) ? profile.coins : 0;
+  if (balance < price) {
+    showToast('Need more coins!');
+    return;
+  }
+
+  profile.coins = balance - price;
 
   if (type === 'color') profile.owned_colors.push(id);
   else if (type === 'sparkle') profile.owned_sparkles.push(id);
@@ -1803,32 +2411,66 @@ document.getElementById('authUsername').addEventListener('keydown', function(e) 
   if (e.key === 'Enter') document.getElementById('authPassword').focus();
 });
 
-// iOS: dismiss keyboard when tapping outside inputs
-document.addEventListener('touchstart', function(e) {
-  if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') {
-    const active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-      active.blur();
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function updateViewportUnit() {
+  const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--vh', `${viewportHeight * 0.01}px`);
+}
+
+function initPlatformUX() {
+  updateViewportUnit();
+  window.addEventListener('resize', updateViewportUnit);
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateViewportUnit);
+    window.visualViewport.addEventListener('scroll', updateViewportUnit);
+  }
+
+  // Dismiss keyboard when tapping outside fields.
+  document.addEventListener('touchstart', function(e) {
+    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        active.blur();
+      }
     }
-  }
-});
-
-// iOS: prevent rubber-band bounce on the play area during drag
-document.addEventListener('touchmove', function(e) {
-  const playArea = document.getElementById('playArea');
-  if (playArea && playArea.contains(e.target)) {
-    // Only prevent default if we're in the play area (allows normal scrolling elsewhere)
-  }
-}, { passive: true });
-
-// iOS: handle viewport resize when keyboard opens
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', function() {
-    document.body.style.height = window.visualViewport.height + 'px';
   });
-  window.visualViewport.addEventListener('scroll', function() {
-    // Keep fixed elements stable during iOS keyboard scroll
-    document.body.style.transform = 'translateY(0)';
+
+  // Prevent rubber-band bounce while dragging slime.
+  document.addEventListener('touchmove', function(e) {
+    const playArea = document.getElementById('playArea');
+    if (playArea && playArea.contains(e.target) && e.cancelable) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  if (!IS_IOS) return;
+
+  document.addEventListener('focusin', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+      document.body.classList.add('ios-keyboard-open');
+      setTimeout(() => {
+        if (typeof e.target.scrollIntoView === 'function') {
+          e.target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        }
+      }, 160);
+    }
+  });
+
+  document.addEventListener('focusout', function() {
+    setTimeout(() => {
+      const active = document.activeElement;
+      const stillTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
+      if (!stillTyping) document.body.classList.remove('ios-keyboard-open');
+    }, 100);
+  });
+
+  window.addEventListener('orientationchange', function() {
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      updateViewportUnit();
+    }, 260);
   });
 }
 
@@ -1836,6 +2478,7 @@ if (window.visualViewport) {
 // INIT — check if already logged in
 // ============================================================
 (async function init() {
+  initPlatformUX();
   if (!sb) return;
   try {
     const { data: { session } } = await sb.auth.getSession();
