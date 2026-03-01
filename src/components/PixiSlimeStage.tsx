@@ -1,13 +1,7 @@
-import {
-  Application,
-  BlurFilter,
-  Container,
-  Graphics,
-  Rectangle,
-  Text,
-  type FederatedPointerEvent,
-} from 'pixi.js';
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { MeshTransmissionMaterial } from '@react-three/drei';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import * as THREE from 'three';
 
 import { findCharm, findSparkle } from '../gameData';
 import type { Slime } from '../types';
@@ -28,519 +22,517 @@ interface PixiSlimeStageProps {
   onInteract?: (kind: InteractionKind) => void;
 }
 
-interface StageRig {
-  app: Application;
-  width: number;
-  height: number;
-  root: Container;
-  slime: Container;
-  groundShadow: Graphics;
-  bodyFill: Graphics;
-  bodyRim: Graphics;
-  bodyDepth: Graphics;
-  sheen: Graphics;
-  leftPupil: Graphics;
-  rightPupil: Graphics;
-  mouth: Graphics;
-  sparkleContainer: Container;
-  particles: Array<{
-    g: Graphics;
-    vx: number;
-    vy: number;
-    ttl: number;
-    age: number;
-  }>;
-  centerX: number;
-  centerY: number;
-  targetX: number;
-  targetY: number;
-  currentX: number;
-  currentY: number;
-  targetScaleX: number;
-  targetScaleY: number;
-  currentScaleX: number;
-  currentScaleY: number;
-  isDragging: boolean;
-  dragOffsetX: number;
-  dragOffsetY: number;
-  wobblePhase: number;
-  colorHex: number;
-  lightHex: number;
-  darkHex: number;
+interface StageControls {
+  poke: () => void;
+  squish: () => void;
+  stretch: () => void;
+  bounce: () => void;
+  megaMorph: () => void;
+  burst: (count?: number) => void;
 }
 
-const MAX_STAGE_WIDTH = 500;
-const STAGE_ASPECT = 0.72;
+interface BurstParticle {
+  mesh: THREE.Mesh;
+  material: THREE.MeshBasicMaterial;
+  velocity: THREE.Vector3;
+  life: number;
+  ttl: number;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function hexToNumber(hex: string): number {
-  const cleaned = hex.replace('#', '');
-  const parsed = Number.parseInt(cleaned, 16);
-  if (Number.isNaN(parsed)) return 0x55efc4;
-  return parsed;
+function hexToColor(hex: string): THREE.Color {
+  const safe = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#55efc4';
+  return new THREE.Color(safe);
 }
 
-function lightenHex(hex: string, percent: number): number {
-  const value = hexToNumber(hex);
-  const r = Math.min(255, (value >> 16) + Math.round((255 * percent) / 100));
-  const g = Math.min(255, ((value >> 8) & 0xff) + Math.round((255 * percent) / 100));
-  const b = Math.min(255, (value & 0xff) + Math.round((255 * percent) / 100));
-  return (r << 16) + (g << 8) + b;
+function lighten(hex: string, amount: number): THREE.Color {
+  return hexToColor(hex).multiplyScalar(1 + amount);
 }
 
-function darkenHex(hex: string, percent: number): number {
-  const value = hexToNumber(hex);
-  const r = Math.max(0, (value >> 16) - Math.round((255 * percent) / 100));
-  const g = Math.max(0, ((value >> 8) & 0xff) - Math.round((255 * percent) / 100));
-  const b = Math.max(0, (value & 0xff) - Math.round((255 * percent) / 100));
-  return (r << 16) + (g << 8) + b;
+function darken(hex: string, amount: number): THREE.Color {
+  return hexToColor(hex).multiplyScalar(1 - amount);
 }
 
-function drawMouth(mouth: Graphics, happy: boolean): void {
-  mouth.clear();
-  const y = happy ? 14 : 8;
-  const width = happy ? 26 : 20;
-  mouth.moveTo(-width, 0);
-  mouth.bezierCurveTo(-width * 0.55, y, width * 0.55, y, width, 0);
-  mouth.stroke({ color: 0x2d3436, width: 4, cap: 'round', join: 'round' });
-}
-
-function makeBlobPoints(radiusX: number, radiusY: number, wobble: number, phase: number): number[] {
-  const points: number[] = [];
-  const segments = 44;
-  for (let i = 0; i <= segments; i += 1) {
-    const angle = (i / segments) * Math.PI * 2;
-    const waveA = Math.sin(angle * 3 + phase) * wobble;
-    const waveB = Math.cos(angle * 5 - phase * 1.25) * wobble * 0.55;
-    const wave = waveA + waveB;
-    const px = Math.cos(angle) * radiusX * (1 + wave);
-    const py = Math.sin(angle) * radiusY * (1 - wave * 0.45);
-    points.push(px, py);
+function createEmojiTexture(emoji: string): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, size, size);
+    ctx.font = '190px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, size / 2, size / 2 + 4);
   }
-  return points;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return texture;
 }
 
-function drawBlob(graphics: Graphics, points: number[], color: number, alpha = 1): void {
-  graphics.clear();
-  graphics.poly(points, true).fill({ color, alpha });
-}
+const SlimeScene = ({
+  slime,
+  onInteract,
+  onReady,
+}: {
+  slime: Slime;
+  onInteract?: (kind: InteractionKind) => void;
+  onReady: (controls: StageControls | null) => void;
+}) => {
+  const { pointer, camera, scene } = useThree();
 
-function drawBlobWithStroke(
-  graphics: Graphics,
-  points: number[],
-  color: number,
-  strokeColor: number,
-  strokeWidth: number,
-  alpha = 1,
-): void {
-  graphics.clear();
-  graphics.poly(points, true).fill({ color, alpha });
-  graphics.poly(points, true).stroke({ color: strokeColor, alpha: 0.6, width: strokeWidth });
-}
+  const rootRef = useRef<THREE.Group>(null);
+  const outerRef = useRef<THREE.Mesh>(null);
+  const innerRef = useRef<THREE.Mesh>(null);
+  const rimRef = useRef<THREE.Mesh>(null);
+  const leftPupilRef = useRef<THREE.Mesh>(null);
+  const rightPupilRef = useRef<THREE.Mesh>(null);
+  const mouthRef = useRef<THREE.Mesh>(null);
+  const sparkleRef = useRef<THREE.Group>(null);
+  const particleLayerRef = useRef<THREE.Group>(null);
 
-function drawBody(rig: StageRig, wobbleStrength: number): void {
-  const radiusX = 118;
-  const radiusY = 92;
-  const points = makeBlobPoints(radiusX, radiusY, wobbleStrength, rig.wobblePhase);
-  const innerPoints = makeBlobPoints(radiusX * 0.9, radiusY * 0.58, wobbleStrength * 0.7, rig.wobblePhase + 0.9);
+  const burstParticlesRef = useRef<BurstParticle[]>([]);
+  const isDraggingRef = useRef(false);
+  const targetPosRef = useRef(new THREE.Vector3(0, -0.02, 0));
+  const currentPosRef = useRef(new THREE.Vector3(0, -0.02, 0));
+  const targetScaleRef = useRef(new THREE.Vector3(1, 1, 1));
+  const currentScaleRef = useRef(new THREE.Vector3(1, 1, 1));
+  const burstGlowRef = useRef(0);
 
-  drawBlobWithStroke(rig.bodyFill, points, rig.colorHex, rig.lightHex, 3, 0.98);
-  drawBlob(rig.bodyRim, points, rig.lightHex, 0.1);
-  drawBlob(rig.bodyDepth, innerPoints, rig.darkHex, 0.26);
-  rig.bodyDepth.position.set(0, 35);
+  const geometry = useMemo(() => new THREE.SphereGeometry(1, 88, 88), []);
+  const innerGeometry = useMemo(() => new THREE.SphereGeometry(0.92, 64, 64), []);
+  const rimGeometry = useMemo(() => new THREE.SphereGeometry(1.03, 48, 48), []);
+  const burstGeometry = useMemo(() => new THREE.SphereGeometry(0.03, 8, 8), []);
 
-  rig.sheen.clear();
-  rig.sheen.ellipse(-26, -40, 62, 27).fill({ color: 0xffffff, alpha: 0.28 });
-  rig.sheen.ellipse(6, -30, 48, 18).fill({ color: 0xffffff, alpha: 0.1 });
-  rig.sheen.rotation = Math.sin(rig.wobblePhase * 0.7) * 0.04;
-}
+  const basePositions = useMemo(
+    () => Float32Array.from((geometry.attributes.position.array as Float32Array).slice()),
+    [geometry],
+  );
+  const normals = useMemo(
+    () => Float32Array.from((geometry.attributes.normal.array as Float32Array).slice()),
+    [geometry],
+  );
 
-function createPupil(x: number): Graphics {
-  const pupil = new Graphics();
-  pupil.circle(0, 0, 5).fill({ color: 0x2d3436 });
-  pupil.position.set(x, -15);
-  return pupil;
-}
+  const sparkle = useMemo(() => findSparkle(slime.sparkle), [slime.sparkle]);
+  const charm = useMemo(() => findCharm(slime.charm), [slime.charm]);
+  const sparklePoints = useMemo(() => {
+    if (!sparkle || sparkle.id === 'none') return [];
+    const rng = (index: number) => {
+      const x = Math.sin(index * 97.221 + slime.id.length * 0.73) * 10000;
+      return x - Math.floor(x);
+    };
+    return Array.from({ length: 18 }, (_, index) => {
+      const phi = rng(index + 1) * Math.PI * 2;
+      const cost = rng(index + 2) * 2 - 1;
+      const sint = Math.sqrt(1 - cost * cost);
+      const radius = 0.2 + rng(index + 3) * 0.62;
+      return new THREE.Vector3(
+        Math.cos(phi) * sint * radius,
+        cost * radius,
+        Math.sin(phi) * sint * radius,
+      );
+    });
+  }, [slime.id, sparkle]);
+
+  const charmTexture = useMemo(() => {
+    if (!charm || charm.id === 'none') return null;
+    return createEmojiTexture(charm.emoji);
+  }, [charm]);
+
+  useEffect(() => {
+    scene.background = null;
+    return () => {
+      scene.background = null;
+    };
+  }, [scene]);
+
+  useEffect(() => {
+    const handlePointerUp = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      targetPosRef.current.set(0, -0.02, 0);
+      targetScaleRef.current.set(1, 1, 1);
+      onInteract?.('drag');
+    };
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [onInteract]);
+
+  useEffect(() => {
+    const controls: StageControls = {
+      poke: () => impulse('poke', 0.84, 1.15, 0.2),
+      squish: () => impulse('squish', 1.35, 0.68, 0.35),
+      stretch: () => impulse('stretch', 0.72, 1.3, 0.3),
+      bounce: () => bounce(),
+      megaMorph: () => mega(),
+      burst: (count = 8) => spawnBurst(count),
+    };
+    onReady(controls);
+    return () => {
+      onReady(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onReady, onInteract]);
+
+  useEffect(() => {
+    camera.position.set(0, 0.12, 4.1);
+    camera.lookAt(0, 0, 0);
+  }, [camera]);
+
+  useEffect(() => {
+    return () => {
+      burstParticlesRef.current.forEach((item) => {
+        item.mesh.removeFromParent();
+        item.material.dispose();
+      });
+      burstParticlesRef.current = [];
+      geometry.dispose();
+      innerGeometry.dispose();
+      rimGeometry.dispose();
+      burstGeometry.dispose();
+      if (charmTexture) charmTexture.dispose();
+    };
+  }, [burstGeometry, charmTexture, geometry, innerGeometry, rimGeometry]);
+
+  const spawnBurst = (count: number): void => {
+    if (!particleLayerRef.current) return;
+    const sparkleColor = sparkle?.color ? hexToColor(sparkle.color) : lighten(slime.color, 0.32);
+    for (let i = 0; i < count; i += 1) {
+      const material = new THREE.MeshBasicMaterial({
+        color: sparkleColor,
+        transparent: true,
+        opacity: 0.92,
+      });
+      const mesh = new THREE.Mesh(burstGeometry, material);
+      mesh.position.set(0, -0.02, 0.95);
+      particleLayerRef.current.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.55 + Math.random() * 0.7;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * speed,
+        (Math.random() - 0.2) * speed + 0.4,
+        (Math.random() - 0.5) * 0.5,
+      );
+      burstParticlesRef.current.push({
+        mesh,
+        material,
+        velocity,
+        life: 0,
+        ttl: 0.45 + Math.random() * 0.28,
+      });
+    }
+    burstGlowRef.current += Math.min(0.65, count * 0.045);
+  };
+
+  const impulse = (kind: InteractionKind, sx: number, sy: number, burst: number): void => {
+    targetScaleRef.current.set(sx, sy, clamp((sx + sy) * 0.5, 0.76, 1.2));
+    spawnBurst(6);
+    burstGlowRef.current += burst;
+    onInteract?.(kind);
+    window.setTimeout(() => {
+      if (isDraggingRef.current) return;
+      targetScaleRef.current.set(1, 1, 1);
+    }, 220);
+  };
+
+  const bounce = (): void => {
+    targetPosRef.current.set(0, 0.55, 0);
+    targetScaleRef.current.set(0.88, 1.2, 0.96);
+    spawnBurst(8);
+    burstGlowRef.current += 0.28;
+    onInteract?.('bounce');
+    window.setTimeout(() => {
+      targetPosRef.current.set(0, -0.02, 0);
+      targetScaleRef.current.set(1.16, 0.84, 1.1);
+      window.setTimeout(() => {
+        if (isDraggingRef.current) return;
+        targetScaleRef.current.set(1, 1, 1);
+      }, 140);
+    }, 180);
+  };
+
+  const mega = (): void => {
+    targetScaleRef.current.set(1.42, 0.63, 1.2);
+    spawnBurst(18);
+    burstGlowRef.current += 0.75;
+    onInteract?.('mega');
+    window.setTimeout(() => {
+      if (isDraggingRef.current) return;
+      targetScaleRef.current.set(1, 1, 1);
+    }, 280);
+  };
+
+  useFrame((state, delta) => {
+    const d = clamp(delta * 60, 0, 2.4);
+    const t = state.clock.elapsedTime;
+
+    if (isDraggingRef.current) {
+      targetPosRef.current.set(pointer.x * 1.24, pointer.y * 0.82 - 0.02, 0);
+      const dist = Math.min(1, Math.hypot(pointer.x, pointer.y));
+      const stretch = 1 + dist * 0.38;
+      const squish = 1 - dist * 0.24;
+      if (Math.abs(pointer.x) > Math.abs(pointer.y)) {
+        targetScaleRef.current.set(stretch, squish, 1);
+      } else {
+        targetScaleRef.current.set(squish, stretch, 1);
+      }
+    }
+
+    currentPosRef.current.lerp(targetPosRef.current, 0.16 * d);
+    currentScaleRef.current.lerp(targetScaleRef.current, 0.18 * d);
+
+    const breathe = 1 + Math.sin(t * 1.8) * 0.018;
+    if (rootRef.current) {
+      rootRef.current.position.copy(currentPosRef.current);
+      rootRef.current.scale.set(
+        currentScaleRef.current.x * breathe,
+        currentScaleRef.current.y / breathe,
+        currentScaleRef.current.z,
+      );
+      rootRef.current.rotation.z = Math.sin(t * 1.2) * 0.05;
+      rootRef.current.rotation.x = Math.sin(t * 0.95) * 0.04;
+    }
+
+    const displacement = 0.022 + Math.sin(t * 1.7) * 0.006 + burstGlowRef.current * 0.018;
+    const positionAttr = geometry.attributes.position as THREE.BufferAttribute;
+    const arr = positionAttr.array as Float32Array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const bx = basePositions[i];
+      const by = basePositions[i + 1];
+      const bz = basePositions[i + 2];
+      const nx = normals[i];
+      const ny = normals[i + 1];
+      const nz = normals[i + 2];
+
+      const waveA = Math.sin(t * 2.2 + nx * 4.2 + ny * 5.8 + nz * 3.7) * displacement;
+      const waveB = Math.cos(t * 3.1 + nx * 6.5 - ny * 4.1 + nz * 6.8) * displacement * 0.42;
+      const radiusScale = 1 + waveA + waveB;
+
+      arr[i] = bx * radiusScale;
+      arr[i + 1] = by * (1 + waveA * 0.75 + waveB * 0.42);
+      arr[i + 2] = bz * (1 + waveA * 0.8 + waveB * 0.56);
+    }
+    positionAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    const eyeLookX = clamp(pointer.x * 0.05, -0.045, 0.045);
+    const eyeLookY = clamp(pointer.y * 0.03, -0.03, 0.03);
+    if (leftPupilRef.current) leftPupilRef.current.position.set(-0.33 + eyeLookX, 0.14 + eyeLookY, 0.95);
+    if (rightPupilRef.current) rightPupilRef.current.position.set(0.33 + eyeLookX, 0.14 + eyeLookY, 0.95);
+
+    if (mouthRef.current) {
+      mouthRef.current.scale.set(1 + burstGlowRef.current * 0.45, 1 + burstGlowRef.current * 0.2, 1);
+      mouthRef.current.rotation.z = Math.sin(t * 1.7) * 0.08;
+    }
+
+    if (sparkleRef.current) {
+      sparkleRef.current.rotation.y += delta * 0.36;
+      sparkleRef.current.children.forEach((child, index) => {
+        child.position.y += Math.sin(t * 1.8 + index * 1.7) * 0.0009;
+        const mesh = child as THREE.Mesh;
+        const material = mesh.material as THREE.MeshStandardMaterial;
+        material.emissiveIntensity = 0.42 + Math.sin(t * 2.4 + index) * 0.2 + burstGlowRef.current * 0.4;
+      });
+    }
+
+    for (let i = burstParticlesRef.current.length - 1; i >= 0; i -= 1) {
+      const particle = burstParticlesRef.current[i];
+      particle.life += delta;
+      particle.mesh.position.addScaledVector(particle.velocity, delta * 2.1);
+      particle.velocity.y -= delta * 0.9;
+      const lifeRatio = clamp(particle.life / particle.ttl, 0, 1);
+      particle.material.opacity = 1 - lifeRatio;
+      const scale = 0.72 + lifeRatio * 1.2;
+      particle.mesh.scale.setScalar(scale);
+      if (lifeRatio >= 1) {
+        particle.mesh.removeFromParent();
+        particle.material.dispose();
+        burstParticlesRef.current.splice(i, 1);
+      }
+    }
+
+    if (outerRef.current) {
+      const material = outerRef.current.material as THREE.MeshPhysicalMaterial;
+      material.clearcoat = clamp(0.8 + burstGlowRef.current * 0.65, 0.8, 1);
+      material.sheen = clamp(0.42 + burstGlowRef.current * 0.5, 0.42, 0.95);
+      material.sheenRoughness = clamp(0.38 - burstGlowRef.current * 0.2, 0.16, 0.38);
+    }
+    if (rimRef.current) {
+      const material = rimRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = clamp(0.14 + burstGlowRef.current * 0.28, 0.14, 0.42);
+    }
+    burstGlowRef.current = Math.max(0, burstGlowRef.current - delta * 1.8);
+  });
+
+  const baseColor = hexToColor(slime.color);
+  const innerColor = darken(slime.color, 0.28);
+  const rimColor = lighten(slime.color, 0.7);
+
+  return (
+    <>
+      <color attach="background" args={['#000000']} />
+
+      <ambientLight intensity={0.62} />
+      <directionalLight position={[2.6, 2.2, 2.5]} intensity={1.15} color="#f4f8ff" />
+      <directionalLight position={[-2.2, -1.5, 1.7]} intensity={0.45} color="#9bc8ff" />
+      <pointLight position={[0, 1.7, 2.4]} intensity={1.1} color="#ffd6f8" />
+
+      <mesh position={[0, -1.5, -0.2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.52, 64]} />
+        <meshBasicMaterial color="#000000" transparent opacity={0.2} />
+      </mesh>
+
+      <group
+        ref={rootRef}
+        position={[0, -0.02, 0]}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          isDraggingRef.current = true;
+          spawnBurst(3);
+          onInteract?.('drag');
+        }}
+      >
+        <group ref={particleLayerRef} />
+
+        <mesh ref={rimRef} geometry={rimGeometry}>
+          <meshBasicMaterial
+            color={rimColor}
+            transparent
+            opacity={0.14}
+            side={THREE.BackSide}
+            depthWrite={false}
+          />
+        </mesh>
+
+        <mesh ref={outerRef} geometry={geometry}>
+          <MeshTransmissionMaterial
+            backside
+            thickness={1.2}
+            roughness={0.06}
+            samples={5}
+            chromaticAberration={0.028}
+            anisotropicBlur={0.08}
+            distortion={0.12}
+            distortionScale={0.35}
+            temporalDistortion={0.16}
+            clearcoat={1}
+            clearcoatRoughness={0.12}
+            ior={1.17}
+            color={baseColor}
+            attenuationColor={baseColor}
+            attenuationDistance={0.9}
+          />
+        </mesh>
+
+        <mesh ref={innerRef} geometry={innerGeometry} position={[0, 0.05, -0.04]}>
+          <meshPhysicalMaterial
+            color={innerColor}
+            transparent
+            opacity={0.3}
+            roughness={0.28}
+            metalness={0.04}
+            clearcoat={0.5}
+            clearcoatRoughness={0.25}
+          />
+        </mesh>
+
+        <group ref={sparkleRef}>
+          {sparklePoints.map((point, index) => (
+            <mesh key={index} position={point}>
+              <sphereGeometry args={[0.05, 14, 14]} />
+              <meshStandardMaterial
+                color={sparkle?.color ?? '#dfe6e9'}
+                emissive={sparkle?.color ?? '#ffffff'}
+                emissiveIntensity={0.5}
+                transparent
+                opacity={0.8}
+                roughness={0.2}
+                metalness={0.1}
+              />
+            </mesh>
+          ))}
+        </group>
+
+        {charmTexture && (
+          <sprite position={[0.63, 0.63, 0.28]} scale={[0.5, 0.5, 0.5]}>
+            <spriteMaterial map={charmTexture} transparent depthWrite={false} />
+          </sprite>
+        )}
+
+        <mesh position={[-0.33, 0.16, 0.9]}>
+          <sphereGeometry args={[0.14, 24, 24]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.2} metalness={0} />
+        </mesh>
+        <mesh position={[0.33, 0.16, 0.9]}>
+          <sphereGeometry args={[0.14, 24, 24]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.2} metalness={0} />
+        </mesh>
+        <mesh ref={leftPupilRef} position={[-0.33, 0.14, 0.95]}>
+          <sphereGeometry args={[0.058, 20, 20]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.42} />
+        </mesh>
+        <mesh ref={rightPupilRef} position={[0.33, 0.14, 0.95]}>
+          <sphereGeometry args={[0.058, 20, 20]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.42} />
+        </mesh>
+
+        <mesh ref={mouthRef} position={[0, -0.28, 0.9]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.2, 0.03, 16, 48, Math.PI]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.45} />
+        </mesh>
+      </group>
+    </>
+  );
+};
 
 export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStageProps>(
   function PixiSlimeStage({ slime, onInteract }, ref) {
-    const hostRef = useRef<HTMLDivElement | null>(null);
-    const rigRef = useRef<StageRig | null>(null);
+    const controlsRef = useRef<StageControls | null>(null);
 
-    useImperativeHandle(ref, () => ({
-      poke: () => impulse('poke', 0.82, 1.16),
-      squish: () => impulse('squish', 1.34, 0.68),
-      stretch: () => impulse('stretch', 0.74, 1.28),
-      bounce: () => bounceEffect(),
-      megaMorph: () => megaEffect(),
-      burst: (count = 8) => spawnBurst(count),
-    }));
+    useImperativeHandle(
+      ref,
+      () => ({
+        poke: () => controlsRef.current?.poke(),
+        squish: () => controlsRef.current?.squish(),
+        stretch: () => controlsRef.current?.stretch(),
+        bounce: () => controlsRef.current?.bounce(),
+        megaMorph: () => controlsRef.current?.megaMorph(),
+        burst: (count?: number) => controlsRef.current?.burst(count),
+      }),
+      [],
+    );
 
-    useEffect(() => {
-      let ignore = false;
-      let mountedApp: Application | null = null;
-      let resizeObserver: ResizeObserver | null = null;
+    if (!slime) return <div className="pixi-host" />;
 
-      async function mount(): Promise<void> {
-        if (!hostRef.current || !slime) return;
-
-        const width = clamp(Math.round(hostRef.current.clientWidth || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
-        const height = clamp(Math.round(width * STAGE_ASPECT), 250, 390);
-
-        const app = new Application();
-        await app.init({
-          width,
-          height,
-          backgroundAlpha: 0,
-          antialias: true,
-          resolution: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
-          autoDensity: true,
-        });
-
-        if (ignore || !hostRef.current) {
-          app.destroy(true);
-          return;
-        }
-
-        mountedApp = app;
-        hostRef.current.innerHTML = '';
-        hostRef.current.appendChild(app.canvas as HTMLCanvasElement);
-
-        const root = new Container();
-        app.stage.addChild(root);
-
-        const centerX = width * 0.5;
-        const centerY = height * 0.58;
-
-        const groundShadow = new Graphics();
-        groundShadow.ellipse(0, 0, 92, 26).fill({ color: 0x000000, alpha: 0.22 });
-        groundShadow.filters = [new BlurFilter({ strength: 6 })];
-        groundShadow.position.set(centerX, centerY + 95);
-        root.addChild(groundShadow);
-
-        const slimeContainer = new Container();
-        slimeContainer.position.set(centerX, centerY);
-        root.addChild(slimeContainer);
-
-        const bodyFill = new Graphics();
-        const bodyRim = new Graphics();
-        const bodyDepth = new Graphics();
-        const sheen = new Graphics();
-
-        slimeContainer.addChild(bodyFill);
-        slimeContainer.addChild(bodyRim);
-        slimeContainer.addChild(bodyDepth);
-        slimeContainer.addChild(sheen);
-
-        const leftEye = new Graphics();
-        leftEye.ellipse(-34, -20, 12, 17).fill({ color: 0xffffff });
-        slimeContainer.addChild(leftEye);
-
-        const rightEye = new Graphics();
-        rightEye.ellipse(34, -20, 12, 17).fill({ color: 0xffffff });
-        slimeContainer.addChild(rightEye);
-
-        const leftPupil = createPupil(-34);
-        const rightPupil = createPupil(34);
-        slimeContainer.addChild(leftPupil);
-        slimeContainer.addChild(rightPupil);
-
-        const mouth = new Graphics();
-        mouth.position.set(0, 22);
-        drawMouth(mouth, false);
-        slimeContainer.addChild(mouth);
-
-        const sparkleContainer = new Container();
-        slimeContainer.addChild(sparkleContainer);
-
-        const sparkle = findSparkle(slime.sparkle);
-        if (sparkle && sparkle.id !== 'none') {
-          for (let i = 0; i < 10; i += 1) {
-            const dot = new Graphics();
-            const size = 2 + Math.random() * 3;
-            dot.circle(0, 0, size).fill({ color: hexToNumber(sparkle.color ?? '#dfe6e9'), alpha: 0.7 });
-            dot.position.set(-68 + Math.random() * 136, -48 + Math.random() * 82);
-            sparkleContainer.addChild(dot);
-          }
-        }
-
-        const charm = findCharm(slime.charm);
-        if (charm && charm.id !== 'none') {
-          const charmText = new Text({
-            text: charm.emoji,
-            style: {
-              fontSize: 30,
-              fontFamily: 'Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif',
-            },
-          });
-          charmText.anchor.set(0.5);
-          charmText.position.set(64, -60);
-          slimeContainer.addChild(charmText);
-        }
-
-        app.stage.eventMode = 'static';
-        app.stage.hitArea = new Rectangle(0, 0, width, height);
-        slimeContainer.eventMode = 'static';
-        slimeContainer.cursor = 'grab';
-
-        const rig: StageRig = {
-          app,
-          width,
-          height,
-          root,
-          slime: slimeContainer,
-          groundShadow,
-          bodyFill,
-          bodyRim,
-          bodyDepth,
-          sheen,
-          leftPupil,
-          rightPupil,
-          mouth,
-          sparkleContainer,
-          particles: [],
-          centerX,
-          centerY,
-          targetX: centerX,
-          targetY: centerY,
-          currentX: centerX,
-          currentY: centerY,
-          targetScaleX: 1,
-          targetScaleY: 1,
-          currentScaleX: 1,
-          currentScaleY: 1,
-          isDragging: false,
-          dragOffsetX: 0,
-          dragOffsetY: 0,
-          wobblePhase: Math.random() * Math.PI * 2,
-          colorHex: hexToNumber(slime.color),
-          lightHex: lightenHex(slime.color, 46),
-          darkHex: darkenHex(slime.color, 42),
-        };
-        rigRef.current = rig;
-        drawBody(rig, 0.035);
-
-        const setPupilLook = (x: number, y: number): void => {
-          const dx = clamp((x - rig.currentX) * 0.05, -4, 4);
-          const dy = clamp((y - rig.currentY) * 0.05, -4, 4);
-          rig.leftPupil.position.set(-34 + dx, -15 + dy);
-          rig.rightPupil.position.set(34 + dx, -15 + dy);
-        };
-
-        const onPointerDown = (event: FederatedPointerEvent): void => {
-          rig.isDragging = true;
-          const { x, y } = event.global;
-          rig.dragOffsetX = x - rig.targetX;
-          rig.dragOffsetY = y - rig.targetY;
-          rig.targetScaleX = 1.08;
-          rig.targetScaleY = 0.92;
-          drawMouth(rig.mouth, false);
-          spawnBurst(3);
-          onInteract?.('drag');
-        };
-
-        const onPointerMove = (event: FederatedPointerEvent): void => {
-          const { x, y } = event.global;
-          setPupilLook(x, y);
-
-          if (!rig.isDragging) return;
-          rig.targetX = clamp(x - rig.dragOffsetX, 90, rig.width - 90);
-          rig.targetY = clamp(y - rig.dragOffsetY, 90, rig.height - 70);
-
-          const dx = rig.targetX - rig.centerX;
-          const dy = rig.targetY - rig.centerY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const stretch = clamp(1 + dist / 340, 1, 1.45);
-          const squish = clamp(1 - dist / 620, 0.76, 1);
-
-          const horizontalFactor = Math.abs(dx) > Math.abs(dy);
-          rig.targetScaleX = horizontalFactor ? stretch : squish;
-          rig.targetScaleY = horizontalFactor ? squish : stretch;
-        };
-
-        const onPointerUp = (): void => {
-          if (!rig.isDragging) return;
-          rig.isDragging = false;
-          rig.targetX = rig.centerX;
-          rig.targetY = rig.centerY;
-          rig.targetScaleX = 1;
-          rig.targetScaleY = 1;
-          drawMouth(rig.mouth, true);
-          setTimeout(() => drawMouth(rig.mouth, false), 220);
-          onInteract?.('drag');
-        };
-
-        slimeContainer.on('pointerdown', onPointerDown);
-        app.stage.on('pointermove', onPointerMove);
-        app.stage.on('pointerup', onPointerUp);
-        app.stage.on('pointerupoutside', onPointerUp);
-
-        app.ticker.add((ticker) => {
-          if (!rigRef.current) return;
-          const step = ticker.deltaMS / 16.666;
-          rig.wobblePhase += 0.05 * step;
-
-          rig.currentX += (rig.targetX - rig.currentX) * 0.2 * step;
-          rig.currentY += (rig.targetY - rig.currentY) * 0.2 * step;
-          rig.currentScaleX += (rig.targetScaleX - rig.currentScaleX) * 0.2 * step;
-          rig.currentScaleY += (rig.targetScaleY - rig.currentScaleY) * 0.2 * step;
-
-          const breathing = 1 + Math.sin(rig.wobblePhase) * 0.02;
-          rig.slime.position.set(rig.currentX, rig.currentY);
-          rig.slime.scale.set(rig.currentScaleX * breathing, rig.currentScaleY / breathing);
-
-          const wobbleStrength = rig.isDragging ? 0.065 : 0.032 + Math.sin(rig.wobblePhase * 1.4) * 0.008;
-          drawBody(rig, wobbleStrength);
-
-          const shadowScaleX = clamp(1 + (rig.currentScaleX - 1) * 0.28, 0.75, 1.45);
-          const shadowScaleY = clamp(1 + (1 - rig.currentScaleY) * 0.4, 0.7, 1.35);
-          rig.groundShadow.position.set(rig.currentX, rig.currentY + 95);
-          rig.groundShadow.scale.set(shadowScaleX, shadowScaleY);
-          rig.groundShadow.alpha = 0.18 + Math.min(0.18, Math.abs(rig.currentY - rig.centerY) / 240);
-
-          rig.sparkleContainer.children.forEach((child, index) => {
-            child.alpha = 0.42 + Math.sin(rig.wobblePhase * 1.6 + index) * 0.3;
-          });
-
-          for (let i = rig.particles.length - 1; i >= 0; i -= 1) {
-            const particle = rig.particles[i];
-            particle.age += ticker.deltaMS;
-            const progress = particle.age / particle.ttl;
-            particle.g.x += particle.vx * step;
-            particle.g.y += particle.vy * step;
-            particle.vy += 0.11 * step;
-            particle.g.alpha = Math.max(0, 1 - progress);
-            particle.g.scale.set(Math.max(0.18, 1 - progress * 0.9));
-
-            if (progress >= 1) {
-              particle.g.destroy();
-              rig.particles.splice(i, 1);
-            }
-          }
-        });
-
-        resizeObserver = new ResizeObserver((entries) => {
-          const entry = entries[0];
-          if (!entry || !rigRef.current) return;
-          const newWidth = clamp(Math.round(entry.contentRect.width || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
-          const newHeight = clamp(Math.round(newWidth * STAGE_ASPECT), 250, 390);
-          if (newWidth === rig.width && newHeight === rig.height) return;
-
-          rig.width = newWidth;
-          rig.height = newHeight;
-          rig.centerX = newWidth * 0.5;
-          rig.centerY = newHeight * 0.58;
-          rig.targetX = rig.centerX;
-          rig.targetY = rig.centerY;
-          rig.currentX = rig.centerX;
-          rig.currentY = rig.centerY;
-
-          app.renderer.resize(newWidth, newHeight);
-          app.stage.hitArea = new Rectangle(0, 0, newWidth, newHeight);
-          rig.slime.position.set(rig.centerX, rig.centerY);
-          rig.groundShadow.position.set(rig.centerX, rig.centerY + 95);
-        });
-        resizeObserver.observe(hostRef.current);
-      }
-
-      mount().catch((error) => {
-        console.error('Pixi stage mount failed:', error);
-      });
-
-      return () => {
-        ignore = true;
-        resizeObserver?.disconnect();
-        rigRef.current = null;
-        if (mountedApp) {
-          mountedApp.destroy(true);
-        }
-      };
-    }, [slime, onInteract]);
-
-    function spawnBurst(count = 8): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-
-      const sparkle = slime ? findSparkle(slime.sparkle) : undefined;
-      const color = sparkle?.color ? hexToNumber(sparkle.color) : slime ? lightenHex(slime.color, 30) : 0xffffff;
-
-      for (let i = 0; i < count; i += 1) {
-        const p = new Graphics();
-        const radius = 2 + Math.random() * 5;
-        p.circle(0, 0, radius).fill({ color, alpha: 0.9 });
-        p.position.set(rig.currentX, rig.currentY);
-        rig.root.addChild(p);
-
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 2.8 + Math.random() * 3.3;
-        rig.particles.push({
-          g: p,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - 1.8,
-          ttl: 700 + Math.random() * 350,
-          age: 0,
-        });
-      }
-    }
-
-    function impulse(kind: InteractionKind, sx: number, sy: number): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      rig.targetScaleX = sx;
-      rig.targetScaleY = sy;
-      drawMouth(rig.mouth, kind === 'bounce' || kind === 'mega');
-      spawnBurst(kind === 'mega' ? 14 : 6);
-      onInteract?.(kind);
-      window.setTimeout(() => {
-        const latest = rigRef.current;
-        if (!latest || latest.isDragging) return;
-        latest.targetScaleX = 1;
-        latest.targetScaleY = 1;
-        drawMouth(latest.mouth, false);
-      }, 220);
-    }
-
-    function bounceEffect(): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      rig.targetY = rig.centerY - 80;
-      rig.targetScaleX = 0.88;
-      rig.targetScaleY = 1.2;
-      spawnBurst(7);
-      onInteract?.('bounce');
-      setTimeout(() => {
-        const latest = rigRef.current;
-        if (!latest) return;
-        latest.targetY = latest.centerY;
-        latest.targetScaleX = 1.18;
-        latest.targetScaleY = 0.82;
-        setTimeout(() => {
-          const finalRig = rigRef.current;
-          if (!finalRig || finalRig.isDragging) return;
-          finalRig.targetScaleX = 1;
-          finalRig.targetScaleY = 1;
-        }, 140);
-      }, 180);
-    }
-
-    function megaEffect(): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      rig.targetScaleX = 1.42;
-      rig.targetScaleY = 0.62;
-      spawnBurst(16);
-      onInteract?.('mega');
-      setTimeout(() => {
-        const latest = rigRef.current;
-        if (!latest || latest.isDragging) return;
-        latest.targetScaleX = 1;
-        latest.targetScaleY = 1;
-      }, 260);
-    }
-
-    return <div className="pixi-host" ref={hostRef} />;
+    return (
+      <div className="pixi-host">
+        <Canvas
+          gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+          dpr={[1, 2]}
+          camera={{ fov: 42, near: 0.1, far: 100, position: [0, 0.12, 4.1] }}
+          style={{ background: 'transparent' }}
+        >
+          <SlimeScene
+            slime={slime}
+            onInteract={onInteract}
+            onReady={(controls) => {
+              controlsRef.current = controls;
+            }}
+          />
+        </Canvas>
+      </div>
+    );
   },
 );

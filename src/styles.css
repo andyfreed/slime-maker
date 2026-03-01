@@ -601,17 +601,51 @@ h3 {
   overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 14px 30px rgba(0, 0, 0, 0.18);
   clip-path: inset(0 round 22px);
+  isolation: isolate;
+}
+
+.play-stage-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% -20%, rgba(255, 255, 255, 0.28), transparent 52%),
+    radial-gradient(100% 70% at 50% 120%, rgba(7, 11, 32, 0.32), transparent 52%);
+  opacity: 0.72;
 }
 
 .pixi-host {
   width: 100%;
   height: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.stage-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.88);
+  background: radial-gradient(
+    120% 120% at 50% 50%,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.02) 52%,
+    transparent 90%
+  );
 }
 
 .pixi-host canvas {
   width: 100%;
   height: 100%;
   display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .play-buttons {

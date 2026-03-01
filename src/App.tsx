@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
-import { PixiSlimeStage, type PixiSlimeStageHandle } from './components/PixiSlimeStage';
+import type { PixiSlimeStageHandle } from './components/PixiSlimeStage';
 import {
   ALL_CHARMS,
   ALL_COLORS,
@@ -17,6 +26,11 @@ import type { CharmItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from 
 
 type Screen = 'auth' | 'home' | 'create' | 'collection' | 'friends' | 'shop' | 'play';
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega' | 'bubble';
+
+const SlimeStage3D = lazy(async () => {
+  const module = await import('./components/PixiSlimeStage');
+  return { default: module.PixiSlimeStage };
+});
 
 interface CreateOptions {
   color: string;
@@ -903,7 +917,7 @@ export default function App() {
 
       {screen === 'auth' && (
         <main className="screen auth-screen">
-          <h1 className="title">Slime Maker v3</h1>
+          <h1 className="title">Slime Maker v4</h1>
           <div className="auth-card">
             <h2>Who is playing?</h2>
             <p>Use the same name + 4-digit code on any device.</p>
@@ -1169,7 +1183,9 @@ export default function App() {
               </div>
 
               <div className="play-stage-wrap">
-                <PixiSlimeStage ref={pixiRef} slime={playSlime} onInteract={handlePixiInteract} />
+                <Suspense fallback={<div className="stage-loading">Loading 3D slime...</div>}>
+                  <SlimeStage3D ref={pixiRef} slime={playSlime} onInteract={handlePixiInteract} />
+                </Suspense>
                 <div className="bubble-layer">
                   {bubbles.map((bubble) => (
                     <button
