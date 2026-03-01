@@ -723,15 +723,12 @@
 <div class="screen active" id="authScreen">
   <h1 class="home-title" style="margin-top:60px;">Slime Maker!</h1>
   <div class="auth-container">
-    <h2 id="authTitle">Log In</h2>
-    <p id="authSubtitle">Welcome back, slime maker!</p>
-    <input type="text" class="auth-input" id="authUsername" placeholder="Username" maxlength="20" autocapitalize="off" autocorrect="off">
-    <input type="password" class="auth-input" id="authPassword" placeholder="Password" maxlength="30">
+    <h2 id="authTitle">Who Is Playing?</h2>
+    <p id="authSubtitle">Type your name and 4-digit kid code. New names are made automatically.</p>
+    <input type="text" class="auth-input" id="authUsername" placeholder="Name" maxlength="20" autocapitalize="off" autocorrect="off">
+    <input type="password" class="auth-input" id="authPassword" placeholder="4-digit kid code" maxlength="4" inputmode="numeric" pattern="[0-9]*">
     <div class="auth-error" id="authError"></div>
-    <button class="btn btn-pink" id="authBtn">Log In</button>
-    <div style="margin-top:15px;">
-      <button type="button" class="auth-switch" id="authSwitch">Don't have an account? Sign Up!</button>
-    </div>
+    <button class="btn btn-pink" id="authBtn">Let's Play!</button>
   </div>
 </div>
 
@@ -846,7 +843,6 @@ let slimes = [];    // array from DB
 let currentSlimeId = null;
 let currentSlimeOwnerId = null; // track if viewing someone else's slime
 let createChoices = { color: '#55efc4', sparkle: 'none', charm: 'none' };
-let authMode = 'login'; // 'login' or 'signup'
 
 // All available items
 const ALL_COLORS = [
@@ -890,99 +886,143 @@ const ALL_CHARMS = [
 // ============================================================
 // AUTH
 // ============================================================
-function toggleAuthMode() {
-  authMode = authMode === 'login' ? 'signup' : 'login';
-  document.getElementById('authTitle').textContent = authMode === 'login' ? 'Log In' : 'Sign Up';
-  document.getElementById('authSubtitle').textContent = authMode === 'login' ? 'Welcome back, slime maker!' : 'Create your slime account!';
-  document.getElementById('authBtn').textContent = authMode === 'login' ? 'Log In' : 'Sign Up';
-  document.getElementById('authSwitch').textContent = authMode === 'login' ? "Don't have an account? Sign Up!" : 'Already have an account? Log In!';
-  document.getElementById('authError').textContent = '';
-  document.getElementById('authUsername').value = '';
-  document.getElementById('authPassword').value = '';
+function normalizeUsername(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+function buildKidPassword(code) {
+  // Supabase expects a stronger password than just 4 digits.
+  return `slime-kid-${code}-play`;
+}
+
+function isInvalidLoginError(err) {
+  const msg = (err && err.message ? err.message : '').toLowerCase();
+  const code = (err && err.code ? err.code : '').toLowerCase();
+  return code === 'invalid_credentials' || msg.includes('invalid login');
+}
+
+function isAlreadyRegisteredError(err) {
+  const msg = (err && err.message ? err.message : '').toLowerCase();
+  const code = String(err && err.code ? err.code : '').toLowerCase();
+  return code === '23505' || msg.includes('already registered') || msg.includes('already exists') || msg.includes('duplicate key');
+}
+
+async function ensureProfileExists(username) {
+  const { data: { user }, error: userError } = await sb.auth.getUser();
+  if (userError || !user) throw new Error('Could not verify your account.');
+
+  const { data: existing, error: readError } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (readError) throw readError;
+  if (existing) return existing;
+
+  const defaults = {
+    id: user.id,
+    username,
+    coins: 0,
+    owned_colors: ['#55efc4', '#74b9ff', '#a29bfe', '#fd79a8', '#ffeaa7'],
+    owned_sparkles: ['none'],
+    owned_charms: ['none'],
+  };
+
+  const { error: insertError } = await sb.from('profiles').insert(defaults);
+  if (insertError && !isAlreadyRegisteredError(insertError)) throw insertError;
+
+  const { data: created, error: createdReadError } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (createdReadError || !created) throw createdReadError || new Error('Could not load your profile.');
+  return created;
 }
 
 async function handleAuth() {
-  const username = document.getElementById('authUsername').value.trim().toLowerCase();
-  const password = document.getElementById('authPassword').value;
+  const username = normalizeUsername(document.getElementById('authUsername').value);
+  const kidCode = document.getElementById('authPassword').value.trim();
   const errorEl = document.getElementById('authError');
   const btn = document.getElementById('authBtn');
 
   errorEl.textContent = '';
 
   if (!sb) { errorEl.textContent = 'Not connected! Check internet and refresh the page.'; return; }
-  if (!username || username.length < 2) { errorEl.textContent = 'Username must be at least 2 characters!'; return; }
-  if (!/^[a-z0-9_]+$/.test(username)) { errorEl.textContent = 'Username: only letters, numbers, and underscores!'; return; }
-  if (!password || password.length < 4) { errorEl.textContent = 'Password must be at least 4 characters!'; return; }
+  if (!username || username.length < 2) { errorEl.textContent = 'Name must be at least 2 characters.'; return; }
+  if (!/^\d{4}$/.test(kidCode)) { errorEl.textContent = 'Kid code must be exactly 4 digits.'; return; }
 
-  // Use fake email for username-based auth
+  // Keep auth simple for kids while still using per-user Supabase accounts.
   const email = `${username}@slimemaker.game`;
+  const password = buildKidPassword(kidCode);
 
   btn.disabled = true;
   btn.innerHTML = '<span class="loading"></span>';
 
   try {
-    if (authMode === 'signup') {
-      // Sign up (don't use trigger — create profile manually)
-      const { data: signUpData, error } = await sb.auth.signUp({
+    let created = false;
+    const { error: signInError } = await sb.auth.signInWithPassword({ email, password });
+
+    if (signInError) {
+      if (!isInvalidLoginError(signInError)) {
+        errorEl.textContent = signInError.message || 'Could not log in.';
+        return;
+      }
+
+      const { error: signUpError } = await sb.auth.signUp({
         email,
         password,
         options: { data: { username } }
       });
-      if (error) {
-        if (error.message.includes('already registered')) {
-          errorEl.textContent = 'That username is taken! Try another one.';
+      if (signUpError) {
+        if (isAlreadyRegisteredError(signUpError)) {
+          errorEl.textContent = 'That name already exists with a different code.';
+        } else if ((signUpError.message || '').toLowerCase().includes('password')) {
+          errorEl.textContent = 'Code setup failed. Please try a different 4-digit code.';
         } else {
-          errorEl.textContent = error.message;
+          errorEl.textContent = signUpError.message || 'Could not create account.';
         }
         return;
       }
+      created = true;
 
-      // Create the profile row ourselves
-      const userId = signUpData.user?.id;
-      if (userId) {
-        const { error: profileError } = await sb
-          .from('profiles')
-          .insert({
-            id: userId,
-            username: username,
-            coins: 0,
-            owned_colors: ['#55efc4','#74b9ff','#a29bfe','#fd79a8','#ffeaa7'],
-            owned_sparkles: ['none'],
-            owned_charms: ['none'],
-          });
-        if (profileError) {
-          console.error('Profile creation error:', profileError);
-          errorEl.textContent = 'Account created but profile failed. Try logging in!';
-          return;
-        }
-      }
-      showToast(`Welcome, ${username}!`);
-    } else {
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) {
-        if (error.message.includes('Invalid login')) {
-          errorEl.textContent = 'Wrong username or password!';
+      // Ensure we have an authenticated session after account creation.
+      const { error: secondSignInError } = await sb.auth.signInWithPassword({ email, password });
+      if (secondSignInError) {
+        if ((secondSignInError.message || '').toLowerCase().includes('email not confirmed')) {
+          errorEl.textContent = 'Account created, but email confirmation is turned on in Supabase.';
         } else {
-          errorEl.textContent = error.message;
+          errorEl.textContent = secondSignInError.message || 'Account created, but login failed.';
         }
         return;
       }
-      showToast(`Welcome back, ${username}!`);
     }
 
-    await loadProfile();
+    profile = await ensureProfileExists(username);
+    if (!profile) {
+      errorEl.textContent = 'Could not load profile.';
+      return;
+    }
+
+    showToast(created ? `Hi ${username}! New account ready!` : `Welcome back, ${username}!`);
     enterGame();
   } catch (e) {
     console.error('Auth error:', e);
     errorEl.textContent = 'Something went wrong. Try again!';
   } finally {
     btn.disabled = false;
-    btn.textContent = authMode === 'login' ? 'Log In' : 'Sign Up';
+    btn.textContent = "Let's Play!";
   }
 }
 
 async function logOut() {
-  if (!confirm('Log out?')) return;
+  if (!confirm('Switch to a different player?')) return;
   await sb.auth.signOut();
   profile = null;
   slimes = [];
@@ -991,11 +1031,9 @@ async function logOut() {
   document.getElementById('authUsername').value = '';
   document.getElementById('authPassword').value = '';
   document.getElementById('authError').textContent = '';
-  authMode = 'login';
-  document.getElementById('authTitle').textContent = 'Log In';
-  document.getElementById('authSubtitle').textContent = 'Welcome back, slime maker!';
-  document.getElementById('authBtn').textContent = 'Log In';
-  document.getElementById('authSwitch').textContent = "Don't have an account? Sign Up!";
+  document.getElementById('authTitle').textContent = 'Who Is Playing?';
+  document.getElementById('authSubtitle').textContent = 'Type your name and 4-digit kid code. New names are made automatically.';
+  document.getElementById('authBtn').textContent = "Let's Play!";
   showScreenRaw('authScreen');
 }
 
@@ -1010,12 +1048,13 @@ async function loadProfile() {
     .from('profiles')
     .select('*')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Profile load error:', error);
     return;
   }
+  if (!data) return;
   profile = data;
 }
 
@@ -1751,9 +1790,6 @@ document.getElementById('toast').addEventListener('click', function() {
 // ============================================================
 // EVENT LISTENERS (no inline onclick — more reliable)
 // ============================================================
-document.getElementById('authSwitch').addEventListener('click', function() {
-  toggleAuthMode();
-});
 
 document.getElementById('authBtn').addEventListener('click', function() {
   handleAuth();
@@ -1805,6 +1841,14 @@ if (window.visualViewport) {
     const { data: { session } } = await sb.auth.getSession();
     if (session) {
       await loadProfile();
+      if (!profile) {
+        const guessedUsername = normalizeUsername(
+          session.user?.user_metadata?.username || (session.user?.email || '').split('@')[0]
+        );
+        if (guessedUsername) {
+          profile = await ensureProfileExists(guessedUsername);
+        }
+      }
       if (profile) {
         enterGame();
         return;
