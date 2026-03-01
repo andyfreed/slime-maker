@@ -144,6 +144,25 @@ function slimeGradient(color: string): string {
   return `radial-gradient(circle at 35% 35%, ${lightenColor(color, 28)}, ${color})`;
 }
 
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+  return hash >>> 0;
+}
+
+function seededNoise(seed: number): number {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
 function makeBubbleId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -164,7 +183,19 @@ function MiniSlime({
 }) {
   const sparkleData = findSparkle(sparkle);
   const charmData = findCharm(charm);
-  const sparkleDots = sparkleData && sparkleData.id !== 'none' ? new Array(8).fill(null) : [];
+  const sparkleDots = useMemo(() => {
+    if (!sparkleData || sparkleData.id === 'none') return [];
+    const base = hashString(`${color}|${sparkle}|${charm}|${size}`);
+    return Array.from({ length: 8 }, (_, index) => {
+      const s = base + index * 131;
+      return {
+        left: 14 + seededNoise(s + 1) * 72,
+        top: 8 + seededNoise(s + 2) * 64,
+        size: 4 + seededNoise(s + 3) * 5,
+        delay: seededNoise(s + 4) * 1.8,
+      };
+    });
+  }, [charm, color, size, sparkle, sparkleData]);
 
   return (
     <div className={`mini-slime ${size}`} style={{ background: slimeGradient(color) }}>
@@ -172,17 +203,17 @@ function MiniSlime({
       <div className="eye left" />
       <div className="eye right" />
       <div className="mouth" />
-      {sparkleDots.map((_, index) => (
+      {sparkleDots.map((dot, index) => (
         <div
           key={`${sparkle}-${index}`}
           className="sparkle-dot"
           style={{
-            left: `${14 + Math.random() * 72}%`,
-            top: `${8 + Math.random() * 64}%`,
-            width: `${4 + Math.random() * 5}px`,
-            height: `${4 + Math.random() * 5}px`,
+            left: `${dot.left}%`,
+            top: `${dot.top}%`,
+            width: `${dot.size}px`,
+            height: `${dot.size}px`,
             background: sparkleData?.color ?? '#dfe6e9',
-            animationDelay: `${Math.random() * 1.8}s`,
+            animationDelay: `${dot.delay}s`,
           }}
         />
       ))}
@@ -800,6 +831,7 @@ export default function App() {
   }, [ensureProfileExists, loadMySlimes]);
 
   useEffect(() => {
+    if (IS_IOS) document.body.classList.add('platform-ios');
     const updateVh = () => {
       const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
       document.documentElement.style.setProperty('--vh', `${viewportHeight * 0.01}px`);
@@ -835,6 +867,7 @@ export default function App() {
       if (IS_IOS) {
         document.removeEventListener('focusin', onFocusIn);
         document.removeEventListener('focusout', onFocusOut);
+        document.body.classList.remove('platform-ios');
       }
     };
   }, []);
@@ -870,7 +903,7 @@ export default function App() {
 
       {screen === 'auth' && (
         <main className="screen auth-screen">
-          <h1 className="title">Slime Maker v2</h1>
+          <h1 className="title">Slime Maker v3</h1>
           <div className="auth-card">
             <h2>Who is playing?</h2>
             <p>Use the same name + 4-digit code on any device.</p>
