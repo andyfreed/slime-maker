@@ -7,6 +7,83 @@ import { findCharm, findSparkle } from '../gameData';
 import type { Slime } from '../types';
 
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega';
+export type RenderQuality = 'ultra' | 'balanced' | 'battery';
+
+interface QualityPreset {
+  dpr: [number, number];
+  geometrySegments: number;
+  innerSegments: number;
+  rimSegments: number;
+  sparkleCount: number;
+  sparkleSegments: number;
+  burstScale: number;
+  burstCap: number;
+  deformEvery: number;
+  distortion: number;
+  distortionScale: number;
+  temporalDistortion: number;
+  chromaticAberration: number;
+  anisotropicBlur: number;
+  roughness: number;
+  transmissionSamples: number;
+}
+
+const QUALITY_PRESETS: Record<RenderQuality, QualityPreset> = {
+  ultra: {
+    dpr: [1, 2],
+    geometrySegments: 88,
+    innerSegments: 64,
+    rimSegments: 48,
+    sparkleCount: 18,
+    sparkleSegments: 14,
+    burstScale: 1,
+    burstCap: 30,
+    deformEvery: 1,
+    distortion: 0.13,
+    distortionScale: 0.36,
+    temporalDistortion: 0.17,
+    chromaticAberration: 0.028,
+    anisotropicBlur: 0.08,
+    roughness: 0.06,
+    transmissionSamples: 5,
+  },
+  balanced: {
+    dpr: [1, 1.75],
+    geometrySegments: 64,
+    innerSegments: 44,
+    rimSegments: 32,
+    sparkleCount: 12,
+    sparkleSegments: 10,
+    burstScale: 0.75,
+    burstCap: 22,
+    deformEvery: 1,
+    distortion: 0.1,
+    distortionScale: 0.24,
+    temporalDistortion: 0.12,
+    chromaticAberration: 0.02,
+    anisotropicBlur: 0.06,
+    roughness: 0.08,
+    transmissionSamples: 3,
+  },
+  battery: {
+    dpr: [1, 1.25],
+    geometrySegments: 42,
+    innerSegments: 28,
+    rimSegments: 20,
+    sparkleCount: 8,
+    sparkleSegments: 8,
+    burstScale: 0.5,
+    burstCap: 14,
+    deformEvery: 2,
+    distortion: 0.06,
+    distortionScale: 0.14,
+    temporalDistortion: 0.07,
+    chromaticAberration: 0.01,
+    anisotropicBlur: 0.03,
+    roughness: 0.12,
+    transmissionSamples: 2,
+  },
+};
 
 export interface PixiSlimeStageHandle {
   poke: () => void;
@@ -20,6 +97,7 @@ export interface PixiSlimeStageHandle {
 interface PixiSlimeStageProps {
   slime: Slime | null;
   onInteract?: (kind: InteractionKind) => void;
+  quality: RenderQuality;
 }
 
 interface StageControls {
@@ -81,12 +159,15 @@ const SlimeScene = ({
   slime,
   onInteract,
   onReady,
+  quality,
 }: {
   slime: Slime;
   onInteract?: (kind: InteractionKind) => void;
   onReady: (controls: StageControls | null) => void;
+  quality: RenderQuality;
 }) => {
   const { pointer, camera, scene } = useThree();
+  const preset = QUALITY_PRESETS[quality];
 
   const rootRef = useRef<THREE.Group>(null);
   const outerRef = useRef<THREE.Mesh>(null);
@@ -105,10 +186,20 @@ const SlimeScene = ({
   const targetScaleRef = useRef(new THREE.Vector3(1, 1, 1));
   const currentScaleRef = useRef(new THREE.Vector3(1, 1, 1));
   const burstGlowRef = useRef(0);
+  const deformFrameRef = useRef(0);
 
-  const geometry = useMemo(() => new THREE.SphereGeometry(1, 88, 88), []);
-  const innerGeometry = useMemo(() => new THREE.SphereGeometry(0.92, 64, 64), []);
-  const rimGeometry = useMemo(() => new THREE.SphereGeometry(1.03, 48, 48), []);
+  const geometry = useMemo(
+    () => new THREE.SphereGeometry(1, preset.geometrySegments, preset.geometrySegments),
+    [preset.geometrySegments],
+  );
+  const innerGeometry = useMemo(
+    () => new THREE.SphereGeometry(0.92, preset.innerSegments, preset.innerSegments),
+    [preset.innerSegments],
+  );
+  const rimGeometry = useMemo(
+    () => new THREE.SphereGeometry(1.03, preset.rimSegments, preset.rimSegments),
+    [preset.rimSegments],
+  );
   const burstGeometry = useMemo(() => new THREE.SphereGeometry(0.03, 8, 8), []);
 
   const basePositions = useMemo(
@@ -128,7 +219,7 @@ const SlimeScene = ({
       const x = Math.sin(index * 97.221 + slime.id.length * 0.73) * 10000;
       return x - Math.floor(x);
     };
-    return Array.from({ length: 18 }, (_, index) => {
+    return Array.from({ length: preset.sparkleCount }, (_, index) => {
       const phi = rng(index + 1) * Math.PI * 2;
       const cost = rng(index + 2) * 2 - 1;
       const sint = Math.sqrt(1 - cost * cost);
@@ -139,7 +230,7 @@ const SlimeScene = ({
         Math.sin(phi) * sint * radius,
       );
     });
-  }, [slime.id, sparkle]);
+  }, [preset.sparkleCount, slime.id, sparkle]);
 
   const charmTexture = useMemo(() => {
     if (!charm || charm.id === 'none') return null;
@@ -207,8 +298,9 @@ const SlimeScene = ({
 
   const spawnBurst = (count: number): void => {
     if (!particleLayerRef.current) return;
+    const scaledCount = clamp(Math.round(count * preset.burstScale), 2, preset.burstCap);
     const sparkleColor = sparkle?.color ? hexToColor(sparkle.color) : lighten(slime.color, 0.32);
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < scaledCount; i += 1) {
       const material = new THREE.MeshBasicMaterial({
         color: sparkleColor,
         transparent: true,
@@ -233,7 +325,7 @@ const SlimeScene = ({
         ttl: 0.45 + Math.random() * 0.28,
       });
     }
-    burstGlowRef.current += Math.min(0.65, count * 0.045);
+    burstGlowRef.current += Math.min(0.65, scaledCount * 0.045);
   };
 
   const impulse = (kind: InteractionKind, sx: number, sy: number, burst: number): void => {
@@ -305,27 +397,30 @@ const SlimeScene = ({
       rootRef.current.rotation.x = Math.sin(t * 0.95) * 0.04;
     }
 
-    const displacement = 0.022 + Math.sin(t * 1.7) * 0.006 + burstGlowRef.current * 0.018;
-    const positionAttr = geometry.attributes.position as THREE.BufferAttribute;
-    const arr = positionAttr.array as Float32Array;
-    for (let i = 0; i < arr.length; i += 3) {
-      const bx = basePositions[i];
-      const by = basePositions[i + 1];
-      const bz = basePositions[i + 2];
-      const nx = normals[i];
-      const ny = normals[i + 1];
-      const nz = normals[i + 2];
+    deformFrameRef.current += 1;
+    if (deformFrameRef.current % preset.deformEvery === 0) {
+      const displacement = 0.022 + Math.sin(t * 1.7) * 0.006 + burstGlowRef.current * 0.018;
+      const positionAttr = geometry.attributes.position as THREE.BufferAttribute;
+      const arr = positionAttr.array as Float32Array;
+      for (let i = 0; i < arr.length; i += 3) {
+        const bx = basePositions[i];
+        const by = basePositions[i + 1];
+        const bz = basePositions[i + 2];
+        const nx = normals[i];
+        const ny = normals[i + 1];
+        const nz = normals[i + 2];
 
-      const waveA = Math.sin(t * 2.2 + nx * 4.2 + ny * 5.8 + nz * 3.7) * displacement;
-      const waveB = Math.cos(t * 3.1 + nx * 6.5 - ny * 4.1 + nz * 6.8) * displacement * 0.42;
-      const radiusScale = 1 + waveA + waveB;
+        const waveA = Math.sin(t * 2.2 + nx * 4.2 + ny * 5.8 + nz * 3.7) * displacement;
+        const waveB = Math.cos(t * 3.1 + nx * 6.5 - ny * 4.1 + nz * 6.8) * displacement * 0.42;
+        const radiusScale = 1 + waveA + waveB;
 
-      arr[i] = bx * radiusScale;
-      arr[i + 1] = by * (1 + waveA * 0.75 + waveB * 0.42);
-      arr[i + 2] = bz * (1 + waveA * 0.8 + waveB * 0.56);
+        arr[i] = bx * radiusScale;
+        arr[i + 1] = by * (1 + waveA * 0.75 + waveB * 0.42);
+        arr[i + 2] = bz * (1 + waveA * 0.8 + waveB * 0.56);
+      }
+      positionAttr.needsUpdate = true;
+      geometry.computeVertexNormals();
     }
-    positionAttr.needsUpdate = true;
-    geometry.computeVertexNormals();
 
     const eyeLookX = clamp(pointer.x * 0.05, -0.045, 0.045);
     const eyeLookY = clamp(pointer.y * 0.03, -0.03, 0.03);
@@ -338,7 +433,7 @@ const SlimeScene = ({
     }
 
     if (sparkleRef.current) {
-      sparkleRef.current.rotation.y += delta * 0.36;
+      sparkleRef.current.rotation.y += delta * (quality === 'ultra' ? 0.36 : quality === 'balanced' ? 0.24 : 0.16);
       sparkleRef.current.children.forEach((child, index) => {
         child.position.y += Math.sin(t * 1.8 + index * 1.7) * 0.0009;
         const mesh = child as THREE.Mesh;
@@ -384,10 +479,22 @@ const SlimeScene = ({
     <>
       <color attach="background" args={['#000000']} />
 
-      <ambientLight intensity={0.62} />
-      <directionalLight position={[2.6, 2.2, 2.5]} intensity={1.15} color="#f4f8ff" />
-      <directionalLight position={[-2.2, -1.5, 1.7]} intensity={0.45} color="#9bc8ff" />
-      <pointLight position={[0, 1.7, 2.4]} intensity={1.1} color="#ffd6f8" />
+      <ambientLight intensity={quality === 'ultra' ? 0.62 : quality === 'balanced' ? 0.56 : 0.5} />
+      <directionalLight
+        position={[2.6, 2.2, 2.5]}
+        intensity={quality === 'ultra' ? 1.15 : quality === 'balanced' ? 0.92 : 0.75}
+        color="#f4f8ff"
+      />
+      <directionalLight
+        position={[-2.2, -1.5, 1.7]}
+        intensity={quality === 'ultra' ? 0.45 : quality === 'balanced' ? 0.3 : 0.22}
+        color="#9bc8ff"
+      />
+      <pointLight
+        position={[0, 1.7, 2.4]}
+        intensity={quality === 'ultra' ? 1.1 : quality === 'balanced' ? 0.82 : 0.62}
+        color="#ffd6f8"
+      />
 
       <mesh position={[0, -1.5, -0.2]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[1.52, 64]} />
@@ -417,23 +524,39 @@ const SlimeScene = ({
         </mesh>
 
         <mesh ref={outerRef} geometry={geometry}>
-          <MeshTransmissionMaterial
-            backside
-            thickness={1.2}
-            roughness={0.06}
-            samples={5}
-            chromaticAberration={0.028}
-            anisotropicBlur={0.08}
-            distortion={0.12}
-            distortionScale={0.35}
-            temporalDistortion={0.16}
-            clearcoat={1}
-            clearcoatRoughness={0.12}
-            ior={1.17}
-            color={baseColor}
-            attenuationColor={baseColor}
-            attenuationDistance={0.9}
-          />
+          {quality === 'battery' ? (
+            <meshPhysicalMaterial
+              transmission={0.86}
+              thickness={0.95}
+              roughness={0.12}
+              clearcoat={0.9}
+              clearcoatRoughness={0.2}
+              ior={1.16}
+              transparent
+              opacity={0.95}
+              color={baseColor}
+              attenuationColor={baseColor}
+              attenuationDistance={1.1}
+            />
+          ) : (
+            <MeshTransmissionMaterial
+              backside
+              thickness={1.2}
+              roughness={preset.roughness}
+              samples={preset.transmissionSamples}
+              chromaticAberration={preset.chromaticAberration}
+              anisotropicBlur={preset.anisotropicBlur}
+              distortion={preset.distortion}
+              distortionScale={preset.distortionScale}
+              temporalDistortion={preset.temporalDistortion}
+              clearcoat={1}
+              clearcoatRoughness={0.12}
+              ior={1.17}
+              color={baseColor}
+              attenuationColor={baseColor}
+              attenuationDistance={0.9}
+            />
+          )}
         </mesh>
 
         <mesh ref={innerRef} geometry={innerGeometry} position={[0, 0.05, -0.04]}>
@@ -451,11 +574,11 @@ const SlimeScene = ({
         <group ref={sparkleRef}>
           {sparklePoints.map((point, index) => (
             <mesh key={index} position={point}>
-              <sphereGeometry args={[0.05, 14, 14]} />
+              <sphereGeometry args={[0.05, preset.sparkleSegments, preset.sparkleSegments]} />
               <meshStandardMaterial
                 color={sparkle?.color ?? '#dfe6e9'}
                 emissive={sparkle?.color ?? '#ffffff'}
-                emissiveIntensity={0.5}
+                emissiveIntensity={quality === 'ultra' ? 0.5 : quality === 'balanced' ? 0.42 : 0.34}
                 transparent
                 opacity={0.8}
                 roughness={0.2}
@@ -498,8 +621,9 @@ const SlimeScene = ({
 };
 
 export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStageProps>(
-  function PixiSlimeStage({ slime, onInteract }, ref) {
+  function PixiSlimeStage({ slime, onInteract, quality }, ref) {
     const controlsRef = useRef<StageControls | null>(null);
+    const preset = QUALITY_PRESETS[quality];
 
     useImperativeHandle(
       ref,
@@ -519,14 +643,19 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
     return (
       <div className="pixi-host">
         <Canvas
-          gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-          dpr={[1, 2]}
+          gl={{
+            antialias: quality !== 'battery',
+            alpha: true,
+            powerPreference: quality === 'battery' ? 'low-power' : 'high-performance',
+          }}
+          dpr={preset.dpr}
           camera={{ fov: 42, near: 0.1, far: 100, position: [0, 0.12, 4.1] }}
           style={{ background: 'transparent' }}
         >
           <SlimeScene
             slime={slime}
             onInteract={onInteract}
+            quality={quality}
             onReady={(controls) => {
               controlsRef.current = controls;
             }}
