@@ -1,5 +1,6 @@
 import {
   Application,
+  BlurFilter,
   Container,
   Graphics,
   Rectangle,
@@ -29,8 +30,15 @@ interface PixiSlimeStageProps {
 
 interface StageRig {
   app: Application;
+  width: number;
+  height: number;
   root: Container;
   slime: Container;
+  groundShadow: Graphics;
+  bodyFill: Graphics;
+  bodyRim: Graphics;
+  bodyDepth: Graphics;
+  sheen: Graphics;
   leftPupil: Graphics;
   rightPupil: Graphics;
   mouth: Graphics;
@@ -56,10 +64,13 @@ interface StageRig {
   dragOffsetX: number;
   dragOffsetY: number;
   wobblePhase: number;
+  colorHex: number;
+  lightHex: number;
+  darkHex: number;
 }
 
-const STAGE_WIDTH = 500;
-const STAGE_HEIGHT = 360;
+const MAX_STAGE_WIDTH = 500;
+const STAGE_ASPECT = 0.72;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -80,6 +91,14 @@ function lightenHex(hex: string, percent: number): number {
   return (r << 16) + (g << 8) + b;
 }
 
+function darkenHex(hex: string, percent: number): number {
+  const value = hexToNumber(hex);
+  const r = Math.max(0, (value >> 16) - Math.round((255 * percent) / 100));
+  const g = Math.max(0, ((value >> 8) & 0xff) - Math.round((255 * percent) / 100));
+  const b = Math.max(0, (value & 0xff) - Math.round((255 * percent) / 100));
+  return (r << 16) + (g << 8) + b;
+}
+
 function drawMouth(mouth: Graphics, happy: boolean): void {
   mouth.clear();
   const y = happy ? 14 : 8;
@@ -89,31 +108,54 @@ function drawMouth(mouth: Graphics, happy: boolean): void {
   mouth.stroke({ color: 0x2d3436, width: 4, cap: 'round', join: 'round' });
 }
 
-function createSlimeBody(color: string): Container {
-  const group = new Container();
+function makeBlobPoints(radiusX: number, radiusY: number, wobble: number, phase: number): number[] {
+  const points: number[] = [];
+  const segments = 44;
+  for (let i = 0; i <= segments; i += 1) {
+    const angle = (i / segments) * Math.PI * 2;
+    const waveA = Math.sin(angle * 3 + phase) * wobble;
+    const waveB = Math.cos(angle * 5 - phase * 1.25) * wobble * 0.55;
+    const wave = waveA + waveB;
+    const px = Math.cos(angle) * radiusX * (1 + wave);
+    const py = Math.sin(angle) * radiusY * (1 - wave * 0.45);
+    points.push(px, py);
+  }
+  return points;
+}
 
-  const base = new Graphics();
-  base.ellipse(0, 0, 118, 92).fill({ color: hexToNumber(color) });
-  base.stroke({ color: lightenHex(color, 38), width: 3, alpha: 0.55 });
-  group.addChild(base);
+function drawBlob(graphics: Graphics, points: number[], color: number, alpha = 1): void {
+  graphics.clear();
+  graphics.poly(points, true).fill({ color, alpha });
+}
 
-  const sheen = new Graphics();
-  sheen.ellipse(-20, -35, 62, 28).fill({ color: 0xffffff, alpha: 0.26 });
-  group.addChild(sheen);
+function drawBlobWithStroke(
+  graphics: Graphics,
+  points: number[],
+  color: number,
+  strokeColor: number,
+  strokeWidth: number,
+  alpha = 1,
+): void {
+  graphics.clear();
+  graphics.poly(points, true).fill({ color, alpha });
+  graphics.poly(points, true).stroke({ color: strokeColor, alpha: 0.6, width: strokeWidth });
+}
 
-  const depth = new Graphics();
-  depth.ellipse(0, 34, 80, 20).fill({ color: 0x000000, alpha: 0.12 });
-  group.addChild(depth);
+function drawBody(rig: StageRig, wobbleStrength: number): void {
+  const radiusX = 118;
+  const radiusY = 92;
+  const points = makeBlobPoints(radiusX, radiusY, wobbleStrength, rig.wobblePhase);
+  const innerPoints = makeBlobPoints(radiusX * 0.9, radiusY * 0.58, wobbleStrength * 0.7, rig.wobblePhase + 0.9);
 
-  const leftEye = new Graphics();
-  leftEye.ellipse(-34, -20, 12, 17).fill({ color: 0xffffff });
-  group.addChild(leftEye);
+  drawBlobWithStroke(rig.bodyFill, points, rig.colorHex, rig.lightHex, 3, 0.98);
+  drawBlob(rig.bodyRim, points, rig.lightHex, 0.1);
+  drawBlob(rig.bodyDepth, innerPoints, rig.darkHex, 0.26);
+  rig.bodyDepth.position.set(0, 35);
 
-  const rightEye = new Graphics();
-  rightEye.ellipse(34, -20, 12, 17).fill({ color: 0xffffff });
-  group.addChild(rightEye);
-
-  return group;
+  rig.sheen.clear();
+  rig.sheen.ellipse(-26, -40, 62, 27).fill({ color: 0xffffff, alpha: 0.28 });
+  rig.sheen.ellipse(6, -30, 48, 18).fill({ color: 0xffffff, alpha: 0.1 });
+  rig.sheen.rotation = Math.sin(rig.wobblePhase * 0.7) * 0.04;
 }
 
 function createPupil(x: number): Graphics {
@@ -140,14 +182,18 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
     useEffect(() => {
       let ignore = false;
       let mountedApp: Application | null = null;
+      let resizeObserver: ResizeObserver | null = null;
 
       async function mount(): Promise<void> {
         if (!hostRef.current || !slime) return;
 
+        const width = clamp(Math.round(hostRef.current.clientWidth || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
+        const height = clamp(Math.round(width * STAGE_ASPECT), 250, 390);
+
         const app = new Application();
         await app.init({
-          width: STAGE_WIDTH,
-          height: STAGE_HEIGHT,
+          width,
+          height,
           backgroundAlpha: 0,
           antialias: true,
           resolution: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
@@ -166,15 +212,36 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
         const root = new Container();
         app.stage.addChild(root);
 
-        const centerX = STAGE_WIDTH * 0.5;
-        const centerY = STAGE_HEIGHT * 0.56;
+        const centerX = width * 0.5;
+        const centerY = height * 0.58;
+
+        const groundShadow = new Graphics();
+        groundShadow.ellipse(0, 0, 92, 26).fill({ color: 0x000000, alpha: 0.22 });
+        groundShadow.filters = [new BlurFilter({ strength: 6 })];
+        groundShadow.position.set(centerX, centerY + 95);
+        root.addChild(groundShadow);
 
         const slimeContainer = new Container();
         slimeContainer.position.set(centerX, centerY);
         root.addChild(slimeContainer);
 
-        const bodyGroup = createSlimeBody(slime.color);
-        slimeContainer.addChild(bodyGroup);
+        const bodyFill = new Graphics();
+        const bodyRim = new Graphics();
+        const bodyDepth = new Graphics();
+        const sheen = new Graphics();
+
+        slimeContainer.addChild(bodyFill);
+        slimeContainer.addChild(bodyRim);
+        slimeContainer.addChild(bodyDepth);
+        slimeContainer.addChild(sheen);
+
+        const leftEye = new Graphics();
+        leftEye.ellipse(-34, -20, 12, 17).fill({ color: 0xffffff });
+        slimeContainer.addChild(leftEye);
+
+        const rightEye = new Graphics();
+        rightEye.ellipse(34, -20, 12, 17).fill({ color: 0xffffff });
+        slimeContainer.addChild(rightEye);
 
         const leftPupil = createPupil(-34);
         const rightPupil = createPupil(34);
@@ -191,11 +258,11 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
 
         const sparkle = findSparkle(slime.sparkle);
         if (sparkle && sparkle.id !== 'none') {
-          for (let i = 0; i < 9; i += 1) {
+          for (let i = 0; i < 10; i += 1) {
             const dot = new Graphics();
             const size = 2 + Math.random() * 3;
-            dot.circle(0, 0, size).fill({ color: hexToNumber(sparkle.color ?? '#dfe6e9'), alpha: 0.65 });
-            dot.position.set(-65 + Math.random() * 130, -45 + Math.random() * 70);
+            dot.circle(0, 0, size).fill({ color: hexToNumber(sparkle.color ?? '#dfe6e9'), alpha: 0.7 });
+            dot.position.set(-68 + Math.random() * 136, -48 + Math.random() * 82);
             sparkleContainer.addChild(dot);
           }
         }
@@ -204,7 +271,10 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
         if (charm && charm.id !== 'none') {
           const charmText = new Text({
             text: charm.emoji,
-            style: { fontSize: 30 },
+            style: {
+              fontSize: 30,
+              fontFamily: 'Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif',
+            },
           });
           charmText.anchor.set(0.5);
           charmText.position.set(64, -60);
@@ -212,14 +282,21 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
         }
 
         app.stage.eventMode = 'static';
-        app.stage.hitArea = new Rectangle(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+        app.stage.hitArea = new Rectangle(0, 0, width, height);
         slimeContainer.eventMode = 'static';
         slimeContainer.cursor = 'grab';
 
         const rig: StageRig = {
           app,
+          width,
+          height,
           root,
           slime: slimeContainer,
+          groundShadow,
+          bodyFill,
+          bodyRim,
+          bodyDepth,
+          sheen,
           leftPupil,
           rightPupil,
           mouth,
@@ -239,8 +316,12 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
           dragOffsetX: 0,
           dragOffsetY: 0,
           wobblePhase: Math.random() * Math.PI * 2,
+          colorHex: hexToNumber(slime.color),
+          lightHex: lightenHex(slime.color, 46),
+          darkHex: darkenHex(slime.color, 42),
         };
         rigRef.current = rig;
+        drawBody(rig, 0.035);
 
         const setPupilLook = (x: number, y: number): void => {
           const dx = clamp((x - rig.currentX) * 0.05, -4, 4);
@@ -266,8 +347,8 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
           setPupilLook(x, y);
 
           if (!rig.isDragging) return;
-          rig.targetX = clamp(x - rig.dragOffsetX, 90, STAGE_WIDTH - 90);
-          rig.targetY = clamp(y - rig.dragOffsetY, 90, STAGE_HEIGHT - 70);
+          rig.targetX = clamp(x - rig.dragOffsetX, 90, rig.width - 90);
+          rig.targetY = clamp(y - rig.dragOffsetY, 90, rig.height - 70);
 
           const dx = rig.targetX - rig.centerX;
           const dy = rig.targetY - rig.centerY;
@@ -300,7 +381,7 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
         app.ticker.add((ticker) => {
           if (!rigRef.current) return;
           const step = ticker.deltaMS / 16.666;
-          rig.wobblePhase += 0.04 * step;
+          rig.wobblePhase += 0.05 * step;
 
           rig.currentX += (rig.targetX - rig.currentX) * 0.2 * step;
           rig.currentY += (rig.targetY - rig.currentY) * 0.2 * step;
@@ -311,8 +392,17 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
           rig.slime.position.set(rig.currentX, rig.currentY);
           rig.slime.scale.set(rig.currentScaleX * breathing, rig.currentScaleY / breathing);
 
+          const wobbleStrength = rig.isDragging ? 0.065 : 0.032 + Math.sin(rig.wobblePhase * 1.4) * 0.008;
+          drawBody(rig, wobbleStrength);
+
+          const shadowScaleX = clamp(1 + (rig.currentScaleX - 1) * 0.28, 0.75, 1.45);
+          const shadowScaleY = clamp(1 + (1 - rig.currentScaleY) * 0.4, 0.7, 1.35);
+          rig.groundShadow.position.set(rig.currentX, rig.currentY + 95);
+          rig.groundShadow.scale.set(shadowScaleX, shadowScaleY);
+          rig.groundShadow.alpha = 0.18 + Math.min(0.18, Math.abs(rig.currentY - rig.centerY) / 240);
+
           rig.sparkleContainer.children.forEach((child, index) => {
-            child.alpha = 0.4 + Math.sin(rig.wobblePhase * 1.6 + index) * 0.28;
+            child.alpha = 0.42 + Math.sin(rig.wobblePhase * 1.6 + index) * 0.3;
           });
 
           for (let i = rig.particles.length - 1; i >= 0; i -= 1) {
@@ -331,6 +421,29 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
             }
           }
         });
+
+        resizeObserver = new ResizeObserver((entries) => {
+          const entry = entries[0];
+          if (!entry || !rigRef.current) return;
+          const newWidth = clamp(Math.round(entry.contentRect.width || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
+          const newHeight = clamp(Math.round(newWidth * STAGE_ASPECT), 250, 390);
+          if (newWidth === rig.width && newHeight === rig.height) return;
+
+          rig.width = newWidth;
+          rig.height = newHeight;
+          rig.centerX = newWidth * 0.5;
+          rig.centerY = newHeight * 0.58;
+          rig.targetX = rig.centerX;
+          rig.targetY = rig.centerY;
+          rig.currentX = rig.centerX;
+          rig.currentY = rig.centerY;
+
+          app.renderer.resize(newWidth, newHeight);
+          app.stage.hitArea = new Rectangle(0, 0, newWidth, newHeight);
+          rig.slime.position.set(rig.centerX, rig.centerY);
+          rig.groundShadow.position.set(rig.centerX, rig.centerY + 95);
+        });
+        resizeObserver.observe(hostRef.current);
       }
 
       mount().catch((error) => {
@@ -339,6 +452,7 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
 
       return () => {
         ignore = true;
+        resizeObserver?.disconnect();
         rigRef.current = null;
         if (mountedApp) {
           mountedApp.destroy(true);
