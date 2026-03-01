@@ -2,6 +2,10 @@
 -- SLIME MAKER - Database Setup
 -- Paste this entire file into Supabase SQL Editor and click "Run"
 -- ============================================================
+-- Auth UX note:
+-- The app now uses a kid-friendly "name + 4-digit code" login.
+-- It auto-creates accounts, so disable email confirmation in
+-- Supabase Auth settings for the smoothest experience.
 
 -- Profiles table (one per user, auto-created on signup)
 create table profiles (
