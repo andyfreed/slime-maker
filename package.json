@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Slime Maker web app rebuilt with React, Vite, and PixiJS.",
+  "description": "Slime Maker web app rebuilt with React, Vite, and Three.js.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -13,16 +13,18 @@
     "slime",
     "kids",
     "react",
-    "pixijs",
+    "threejs",
     "supabase"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "@supabase/supabase-js": "^2.98.0",
-    "pixi.js": "^8.16.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

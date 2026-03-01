@@ -1,34 +1,89 @@
-import {
-  Application,
-  BlurFilter,
-  Container,
-  Graphics,
-  Rectangle,
-  Text,
-  type FederatedPointerEvent,
-} from 'pixi.js';
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { MeshTransmissionMaterial } from '@react-three/drei';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import * as THREE from 'three';
 
 import { findCharm, findSparkle } from '../gameData';
-import {
-  clamp,
-  createShake,
-  easeOutCubic,
-  lerp,
-  playSfx,
-  rand,
-  updateShake,
-  type ScreenShake,
-} from '../game/juice';
-import {
-  getPersonality,
-  moodToExpression,
-  type SlimePersonality,
-  type MoodExpression,
-} from '../game/slimePersonality';
 import type { Slime } from '../types';
 
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega';
+export type RenderQuality = 'ultra' | 'balanced' | 'battery';
+
+interface QualityPreset {
+  dpr: [number, number];
+  geometrySegments: number;
+  innerSegments: number;
+  rimSegments: number;
+  sparkleCount: number;
+  sparkleSegments: number;
+  burstScale: number;
+  burstCap: number;
+  deformEvery: number;
+  distortion: number;
+  distortionScale: number;
+  temporalDistortion: number;
+  chromaticAberration: number;
+  anisotropicBlur: number;
+  roughness: number;
+  transmissionSamples: number;
+}
+
+const QUALITY_PRESETS: Record<RenderQuality, QualityPreset> = {
+  ultra: {
+    dpr: [1, 2],
+    geometrySegments: 88,
+    innerSegments: 64,
+    rimSegments: 48,
+    sparkleCount: 18,
+    sparkleSegments: 14,
+    burstScale: 1,
+    burstCap: 30,
+    deformEvery: 1,
+    distortion: 0.13,
+    distortionScale: 0.36,
+    temporalDistortion: 0.17,
+    chromaticAberration: 0.028,
+    anisotropicBlur: 0.08,
+    roughness: 0.06,
+    transmissionSamples: 5,
+  },
+  balanced: {
+    dpr: [1, 1.75],
+    geometrySegments: 64,
+    innerSegments: 44,
+    rimSegments: 32,
+    sparkleCount: 12,
+    sparkleSegments: 10,
+    burstScale: 0.75,
+    burstCap: 22,
+    deformEvery: 1,
+    distortion: 0.1,
+    distortionScale: 0.24,
+    temporalDistortion: 0.12,
+    chromaticAberration: 0.02,
+    anisotropicBlur: 0.06,
+    roughness: 0.08,
+    transmissionSamples: 3,
+  },
+  battery: {
+    dpr: [1, 1.25],
+    geometrySegments: 42,
+    innerSegments: 28,
+    rimSegments: 20,
+    sparkleCount: 8,
+    sparkleSegments: 8,
+    burstScale: 0.5,
+    burstCap: 14,
+    deformEvery: 2,
+    distortion: 0.06,
+    distortionScale: 0.14,
+    temporalDistortion: 0.07,
+    chromaticAberration: 0.01,
+    anisotropicBlur: 0.03,
+    roughness: 0.12,
+    transmissionSamples: 2,
+  },
+};
 
 export interface PixiSlimeStageHandle {
   poke: () => void;
@@ -37,911 +92,576 @@ export interface PixiSlimeStageHandle {
   bounce: () => void;
   megaMorph: () => void;
   burst: (count?: number) => void;
-  setMood: (mood: string) => void;
 }
 
 interface PixiSlimeStageProps {
   slime: Slime | null;
   onInteract?: (kind: InteractionKind) => void;
+  quality: RenderQuality;
 }
 
-/* ===============================
-   ACTION STATE
-   =============================== */
-
-interface ActionState {
-  kind: InteractionKind | null;
-  t: number;
-  duration: number;
-  intensity: number;
-  dirX: number;
-  dirY: number;
+interface StageControls {
+  poke: () => void;
+  squish: () => void;
+  stretch: () => void;
+  bounce: () => void;
+  megaMorph: () => void;
+  burst: (count?: number) => void;
 }
 
-/* ===============================
-   ULTIMATE STATE
-   =============================== */
-
-type UltPhase = 'idle' | 'charge' | 'explode' | 'afterglow';
-
-interface UltimateState {
-  active: boolean;
-  phase: UltPhase;
-  t: number;
-  auraT: number;
+interface BurstParticle {
+  mesh: THREE.Mesh;
+  material: THREE.MeshBasicMaterial;
+  velocity: THREE.Vector3;
+  life: number;
+  ttl: number;
 }
 
-/* ===============================
-   EXPRESSION STATE
-   =============================== */
-
-interface ExpressionState {
-  blinkProgress: number;
-  blinkTimer: number;
-  isBlinking: boolean;
-  currentExpression: MoodExpression;
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
-/* ===============================
-   STAGE RIG
-   =============================== */
-
-interface StageRig {
-  app: Application;
-  width: number;
-  height: number;
-  root: Container;
-  slime: Container;
-  vfxContainer: Container;
-  groundShadow: Graphics;
-  bodyFill: Graphics;
-  bodyRim: Graphics;
-  bodyDepth: Graphics;
-  sheen: Graphics;
-  leftEyeWhite: Graphics;
-  rightEyeWhite: Graphics;
-  leftPupil: Graphics;
-  rightPupil: Graphics;
-  leftBrow: Graphics;
-  rightBrow: Graphics;
-  leftCheek: Graphics;
-  rightCheek: Graphics;
-  mouth: Graphics;
-  sparkleContainer: Container;
-  auraGlow: Graphics;
-  auraRing: Container;
-  particles: Array<{
-    g: Graphics;
-    vx: number;
-    vy: number;
-    ttl: number;
-    age: number;
-    type?: 'sparkle' | 'star' | 'confetti' | 'ring';
-  }>;
-  centerX: number;
-  centerY: number;
-  targetX: number;
-  targetY: number;
-  currentX: number;
-  currentY: number;
-  targetScaleX: number;
-  targetScaleY: number;
-  currentScaleX: number;
-  currentScaleY: number;
-  isDragging: boolean;
-  dragOffsetX: number;
-  dragOffsetY: number;
-  wobblePhase: number;
-  colorHex: number;
-  lightHex: number;
-  darkHex: number;
-  personality: SlimePersonality;
-  action: ActionState;
-  ultimate: UltimateState;
-  expression: ExpressionState;
-  shake: ScreenShake;
-  megaText: Text | null;
+function hexToColor(hex: string): THREE.Color {
+  const safe = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#55efc4';
+  return new THREE.Color(safe);
 }
 
-const MAX_STAGE_WIDTH = 500;
-const STAGE_ASPECT = 0.72;
-
-/* ===============================
-   COLOR UTILS
-   =============================== */
-
-function hexToNumber(hex: string): number {
-  const cleaned = hex.replace('#', '');
-  const parsed = Number.parseInt(cleaned, 16);
-  if (Number.isNaN(parsed)) return 0x55efc4;
-  return parsed;
+function lighten(hex: string, amount: number): THREE.Color {
+  return hexToColor(hex).multiplyScalar(1 + amount);
 }
 
-function lightenHex(hex: string, percent: number): number {
-  const value = hexToNumber(hex);
-  const r = Math.min(255, (value >> 16) + Math.round((255 * percent) / 100));
-  const g = Math.min(255, ((value >> 8) & 0xff) + Math.round((255 * percent) / 100));
-  const b = Math.min(255, (value & 0xff) + Math.round((255 * percent) / 100));
-  return (r << 16) + (g << 8) + b;
+function darken(hex: string, amount: number): THREE.Color {
+  return hexToColor(hex).multiplyScalar(1 - amount);
 }
 
-function darkenHex(hex: string, percent: number): number {
-  const value = hexToNumber(hex);
-  const r = Math.max(0, (value >> 16) - Math.round((255 * percent) / 100));
-  const g = Math.max(0, ((value >> 8) & 0xff) - Math.round((255 * percent) / 100));
-  const b = Math.max(0, (value & 0xff) - Math.round((255 * percent) / 100));
-  return (r << 16) + (g << 8) + b;
+function createEmojiTexture(emoji: string): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, size, size);
+    ctx.font = '190px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, size / 2, size / 2 + 4);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return texture;
 }
 
-/* ===============================
-   FACE DRAWING
-   =============================== */
+const SlimeScene = ({
+  slime,
+  onInteract,
+  onReady,
+  quality,
+}: {
+  slime: Slime;
+  onInteract?: (kind: InteractionKind) => void;
+  onReady: (controls: StageControls | null) => void;
+  quality: RenderQuality;
+}) => {
+  const { pointer, camera, scene } = useThree();
+  const preset = QUALITY_PRESETS[quality];
 
-function drawMouthShape(
-  mouth: Graphics,
-  personality: SlimePersonality,
-  expression: MoodExpression,
-  actionHappy: boolean,
-): void {
-  mouth.clear();
-  let width: number;
-  let controlY: number;
-  if (actionHappy) {
-    width = 26;
-    controlY = 16;
-  } else {
-    switch (expression) {
-      case 'excited':
-        width = personality.mouthStyle === 'grin' ? 30 : 24;
-        controlY = personality.mouthStyle === 'open' ? 20 : 16;
-        break;
-      case 'playful':
-        width = 22;
-        controlY = 12;
-        break;
-      default:
-        width = personality.mouthStyle === 'smirk' ? 18 : 20;
-        controlY = personality.mouthStyle === 'smile' ? 10 : 8;
-        break;
+  const rootRef = useRef<THREE.Group>(null);
+  const outerRef = useRef<THREE.Mesh>(null);
+  const innerRef = useRef<THREE.Mesh>(null);
+  const rimRef = useRef<THREE.Mesh>(null);
+  const leftPupilRef = useRef<THREE.Mesh>(null);
+  const rightPupilRef = useRef<THREE.Mesh>(null);
+  const mouthRef = useRef<THREE.Mesh>(null);
+  const sparkleRef = useRef<THREE.Group>(null);
+  const particleLayerRef = useRef<THREE.Group>(null);
+
+  const burstParticlesRef = useRef<BurstParticle[]>([]);
+  const isDraggingRef = useRef(false);
+  const targetPosRef = useRef(new THREE.Vector3(0, -0.02, 0));
+  const currentPosRef = useRef(new THREE.Vector3(0, -0.02, 0));
+  const targetScaleRef = useRef(new THREE.Vector3(1, 1, 1));
+  const currentScaleRef = useRef(new THREE.Vector3(1, 1, 1));
+  const burstGlowRef = useRef(0);
+  const deformFrameRef = useRef(0);
+
+  const geometry = useMemo(
+    () => new THREE.SphereGeometry(1, preset.geometrySegments, preset.geometrySegments),
+    [preset.geometrySegments],
+  );
+  const innerGeometry = useMemo(
+    () => new THREE.SphereGeometry(0.92, preset.innerSegments, preset.innerSegments),
+    [preset.innerSegments],
+  );
+  const rimGeometry = useMemo(
+    () => new THREE.SphereGeometry(1.03, preset.rimSegments, preset.rimSegments),
+    [preset.rimSegments],
+  );
+  const burstGeometry = useMemo(() => new THREE.SphereGeometry(0.03, 8, 8), []);
+
+  const basePositions = useMemo(
+    () => Float32Array.from((geometry.attributes.position.array as Float32Array).slice()),
+    [geometry],
+  );
+  const normals = useMemo(
+    () => Float32Array.from((geometry.attributes.normal.array as Float32Array).slice()),
+    [geometry],
+  );
+
+  const sparkle = useMemo(() => findSparkle(slime.sparkle), [slime.sparkle]);
+  const charm = useMemo(() => findCharm(slime.charm), [slime.charm]);
+  const sparklePoints = useMemo(() => {
+    if (!sparkle || sparkle.id === 'none') return [];
+    const rng = (index: number) => {
+      const x = Math.sin(index * 97.221 + slime.id.length * 0.73) * 10000;
+      return x - Math.floor(x);
+    };
+    return Array.from({ length: preset.sparkleCount }, (_, index) => {
+      const phi = rng(index + 1) * Math.PI * 2;
+      const cost = rng(index + 2) * 2 - 1;
+      const sint = Math.sqrt(1 - cost * cost);
+      const radius = 0.2 + rng(index + 3) * 0.62;
+      return new THREE.Vector3(
+        Math.cos(phi) * sint * radius,
+        cost * radius,
+        Math.sin(phi) * sint * radius,
+      );
+    });
+  }, [preset.sparkleCount, slime.id, sparkle]);
+
+  const charmTexture = useMemo(() => {
+    if (!charm || charm.id === 'none') return null;
+    return createEmojiTexture(charm.emoji);
+  }, [charm]);
+
+  useEffect(() => {
+    scene.background = null;
+    return () => {
+      scene.background = null;
+    };
+  }, [scene]);
+
+  useEffect(() => {
+    const handlePointerUp = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      targetPosRef.current.set(0, -0.02, 0);
+      targetScaleRef.current.set(1, 1, 1);
+      onInteract?.('drag');
+    };
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [onInteract]);
+
+  useEffect(() => {
+    const controls: StageControls = {
+      poke: () => impulse('poke', 0.84, 1.15, 0.2),
+      squish: () => impulse('squish', 1.35, 0.68, 0.35),
+      stretch: () => impulse('stretch', 0.72, 1.3, 0.3),
+      bounce: () => bounce(),
+      megaMorph: () => mega(),
+      burst: (count = 8) => spawnBurst(count),
+    };
+    onReady(controls);
+    return () => {
+      onReady(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onReady, onInteract]);
+
+  useEffect(() => {
+    camera.position.set(0, 0.12, 4.1);
+    camera.lookAt(0, 0, 0);
+  }, [camera]);
+
+  useEffect(() => {
+    return () => {
+      burstParticlesRef.current.forEach((item) => {
+        item.mesh.removeFromParent();
+        item.material.dispose();
+      });
+      burstParticlesRef.current = [];
+      geometry.dispose();
+      innerGeometry.dispose();
+      rimGeometry.dispose();
+      burstGeometry.dispose();
+      if (charmTexture) charmTexture.dispose();
+    };
+  }, [burstGeometry, charmTexture, geometry, innerGeometry, rimGeometry]);
+
+  const spawnBurst = (count: number): void => {
+    if (!particleLayerRef.current) return;
+    const scaledCount = clamp(Math.round(count * preset.burstScale), 2, preset.burstCap);
+    const sparkleColor = sparkle?.color ? hexToColor(sparkle.color) : lighten(slime.color, 0.32);
+    for (let i = 0; i < scaledCount; i += 1) {
+      const material = new THREE.MeshBasicMaterial({
+        color: sparkleColor,
+        transparent: true,
+        opacity: 0.92,
+      });
+      const mesh = new THREE.Mesh(burstGeometry, material);
+      mesh.position.set(0, -0.02, 0.95);
+      particleLayerRef.current.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.55 + Math.random() * 0.7;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * speed,
+        (Math.random() - 0.2) * speed + 0.4,
+        (Math.random() - 0.5) * 0.5,
+      );
+      burstParticlesRef.current.push({
+        mesh,
+        material,
+        velocity,
+        life: 0,
+        ttl: 0.45 + Math.random() * 0.28,
+      });
     }
-  }
-  const offsetX = personality.mouthStyle === 'smirk' ? 4 : 0;
-  mouth.moveTo(-width + offsetX, 0);
-  mouth.bezierCurveTo(-width * 0.55 + offsetX, controlY, width * 0.55 + offsetX, controlY, width + offsetX, 0);
-  mouth.stroke({ color: 0x2d3436, width: 4, cap: 'round', join: 'round' });
-  if ((personality.mouthStyle === 'open' && expression === 'excited') || actionHappy) {
-    mouth.moveTo(-width * 0.6 + offsetX, 2);
-    mouth.bezierCurveTo(-width * 0.35 + offsetX, controlY * 0.7, width * 0.35 + offsetX, controlY * 0.7, width * 0.6 + offsetX, 2);
-    mouth.fill({ color: 0x2d3436, alpha: 0.15 });
-  }
-}
+    burstGlowRef.current += Math.min(0.65, scaledCount * 0.045);
+  };
 
-function drawEyes(rig: StageRig): void {
-  const p = rig.personality;
-  const blink = rig.expression.blinkProgress;
-  rig.leftEyeWhite.clear();
-  rig.rightEyeWhite.clear();
-  let eyeW: number;
-  let eyeH: number;
-  switch (p.eyeStyle) {
-    case 'oval': eyeW = 14; eyeH = 19; break;
-    case 'sleepy': eyeW = 13; eyeH = 14; break;
-    default: eyeW = 12; eyeH = 17;
-  }
-  const blinkScale = 1 - blink * 0.9;
-  const effectiveH = eyeH * blinkScale;
-  rig.leftEyeWhite.ellipse(-34, -20, eyeW, effectiveH).fill({ color: 0xffffff });
-  rig.rightEyeWhite.ellipse(34, -20, eyeW, effectiveH).fill({ color: 0xffffff });
-  let pupilR: number;
-  switch (p.pupilSize) {
-    case 'small': pupilR = 3.5; break;
-    case 'large': pupilR = 6.5; break;
-    default: pupilR = 5;
-  }
-  rig.leftPupil.clear();
-  rig.rightPupil.clear();
-  if (blink < 0.7) {
-    rig.leftPupil.circle(0, 0, pupilR).fill({ color: 0x2d3436 });
-    rig.rightPupil.circle(0, 0, pupilR).fill({ color: 0x2d3436 });
-    rig.leftPupil.circle(-pupilR * 0.3, -pupilR * 0.35, pupilR * 0.3).fill({ color: 0xffffff, alpha: 0.5 });
-    rig.rightPupil.circle(-pupilR * 0.3, -pupilR * 0.35, pupilR * 0.3).fill({ color: 0xffffff, alpha: 0.5 });
-  }
-}
+  const impulse = (kind: InteractionKind, sx: number, sy: number, burst: number): void => {
+    targetScaleRef.current.set(sx, sy, clamp((sx + sy) * 0.5, 0.76, 1.2));
+    spawnBurst(6);
+    burstGlowRef.current += burst;
+    onInteract?.(kind);
+    window.setTimeout(() => {
+      if (isDraggingRef.current) return;
+      targetScaleRef.current.set(1, 1, 1);
+    }, 220);
+  };
 
-function drawBrows(rig: StageRig): void {
-  rig.leftBrow.clear();
-  rig.rightBrow.clear();
-  if (rig.personality.browStyle === 'none') return;
-  const expr = rig.expression.currentExpression;
-  const browY = expr === 'excited' ? -46 : -42;
-  const tiltL = expr === 'excited' ? -0.15 : 0;
-  const tiltR = expr === 'excited' ? 0.15 : 0;
-  rig.leftBrow.moveTo(-8, 0).lineTo(8, 0).stroke({ color: 0x2d3436, width: 3, cap: 'round' });
-  rig.leftBrow.position.set(-34, browY);
-  rig.leftBrow.rotation = tiltL;
-  rig.rightBrow.moveTo(-8, 0).lineTo(8, 0).stroke({ color: 0x2d3436, width: 3, cap: 'round' });
-  rig.rightBrow.position.set(34, browY);
-  rig.rightBrow.rotation = tiltR;
-}
+  const bounce = (): void => {
+    targetPosRef.current.set(0, 0.55, 0);
+    targetScaleRef.current.set(0.88, 1.2, 0.96);
+    spawnBurst(8);
+    burstGlowRef.current += 0.28;
+    onInteract?.('bounce');
+    window.setTimeout(() => {
+      targetPosRef.current.set(0, -0.02, 0);
+      targetScaleRef.current.set(1.16, 0.84, 1.1);
+      window.setTimeout(() => {
+        if (isDraggingRef.current) return;
+        targetScaleRef.current.set(1, 1, 1);
+      }, 140);
+    }, 180);
+  };
 
-function drawCheeks(rig: StageRig): void {
-  rig.leftCheek.clear();
-  rig.rightCheek.clear();
-  if (rig.personality.cheekStyle === 'none') return;
-  const expr = rig.expression.currentExpression;
-  const alpha = expr === 'excited' || expr === 'playful' ? 0.25 : 0.15;
-  if (rig.personality.cheekStyle === 'blush') {
-    rig.leftCheek.circle(0, 0, 7).fill({ color: 0xff9999, alpha });
-    rig.rightCheek.circle(0, 0, 7).fill({ color: 0xff9999, alpha });
-  } else {
-    rig.leftCheek.ellipse(0, 0, 12, 8).fill({ color: 0xff9999, alpha: alpha * 0.7 });
-    rig.rightCheek.ellipse(0, 0, 12, 8).fill({ color: 0xff9999, alpha: alpha * 0.7 });
-  }
-  rig.leftCheek.position.set(-52, 8);
-  rig.rightCheek.position.set(52, 8);
-}
+  const mega = (): void => {
+    targetScaleRef.current.set(1.42, 0.63, 1.2);
+    spawnBurst(18);
+    burstGlowRef.current += 0.75;
+    onInteract?.('mega');
+    window.setTimeout(() => {
+      if (isDraggingRef.current) return;
+      targetScaleRef.current.set(1, 1, 1);
+    }, 280);
+  };
 
-/* ===============================
-   BLOB / BODY
-   =============================== */
+  useFrame((state, delta) => {
+    const d = clamp(delta * 60, 0, 2.4);
+    const t = state.clock.elapsedTime;
 
-function makeBlobPoints(
-  radiusX: number,
-  radiusY: number,
-  wobble: number,
-  phase: number,
-  action: ActionState,
-): number[] {
-  const points: number[] = [];
-  const segments = 44;
-  for (let i = 0; i <= segments; i += 1) {
-    const angle = (i / segments) * Math.PI * 2;
-    const waveA = Math.sin(angle * 3 + phase) * wobble;
-    const waveB = Math.cos(angle * 5 - phase * 1.25) * wobble * 0.55;
-    let wave = waveA + waveB;
-
-    if (action.kind && action.t < action.duration) {
-      const progress = action.t / action.duration;
-      const fade = 1 - easeOutCubic(progress);
-      switch (action.kind) {
-        case 'poke': {
-          const dist = Math.abs(angle - Math.PI * 1.5);
-          wave -= Math.exp(-dist * dist * 2) * 0.15 * fade;
-          wave += Math.sin(angle * 8 - progress * 12) * 0.03 * fade;
-          break;
-        }
-        case 'squish':
-          wave += Math.cos(angle * 2) * 0.08 * fade * action.intensity;
-          break;
-        case 'stretch': {
-          const pullDir = Math.cos(angle - Math.atan2(action.dirY, action.dirX));
-          wave += pullDir * 0.06 * fade * action.intensity;
-          wave += Math.sin(angle * 6 + progress * 10) * 0.02 * fade;
-          break;
-        }
-        case 'bounce':
-          if (progress > 0.4) {
-            wave += Math.cos(angle * 2) * Math.sin(((progress - 0.4) / 0.6) * Math.PI) * 0.06;
-          }
-          wave += Math.sin(angle * 10 + progress * 20) * 0.015 * fade;
-          break;
-        case 'mega':
-          wave += Math.sin(angle * 4 + progress * 8) * 0.08 * fade;
-          wave += Math.cos(angle * 7 - progress * 15) * 0.04 * fade;
-          break;
+    if (isDraggingRef.current) {
+      targetPosRef.current.set(pointer.x * 1.24, pointer.y * 0.82 - 0.02, 0);
+      const dist = Math.min(1, Math.hypot(pointer.x, pointer.y));
+      const stretch = 1 + dist * 0.38;
+      const squish = 1 - dist * 0.24;
+      if (Math.abs(pointer.x) > Math.abs(pointer.y)) {
+        targetScaleRef.current.set(stretch, squish, 1);
+      } else {
+        targetScaleRef.current.set(squish, stretch, 1);
       }
     }
-    points.push(Math.cos(angle) * radiusX * (1 + wave), Math.sin(angle) * radiusY * (1 - wave * 0.45));
-  }
-  return points;
-}
 
-const noAction: ActionState = { kind: null, t: 0, duration: 0, intensity: 1, dirX: 0, dirY: 0 };
+    currentPosRef.current.lerp(targetPosRef.current, 0.16 * d);
+    currentScaleRef.current.lerp(targetScaleRef.current, 0.18 * d);
 
-function drawBlob(graphics: Graphics, points: number[], color: number, alpha = 1): void {
-  graphics.clear();
-  graphics.poly(points, true).fill({ color, alpha });
-}
-
-function drawBlobWithStroke(
-  graphics: Graphics,
-  points: number[],
-  color: number,
-  strokeColor: number,
-  strokeWidth: number,
-  alpha = 1,
-): void {
-  graphics.clear();
-  graphics.poly(points, true).fill({ color, alpha });
-  graphics.poly(points, true).stroke({ color: strokeColor, alpha: 0.6, width: strokeWidth });
-}
-
-function drawBody(rig: StageRig, wobbleStrength: number): void {
-  const radiusX = 118;
-  const radiusY = 92;
-  const points = makeBlobPoints(radiusX, radiusY, wobbleStrength, rig.wobblePhase, rig.action);
-  const innerPoints = makeBlobPoints(radiusX * 0.9, radiusY * 0.58, wobbleStrength * 0.7, rig.wobblePhase + 0.9, noAction);
-  drawBlobWithStroke(rig.bodyFill, points, rig.colorHex, rig.lightHex, 3, 0.98);
-  drawBlob(rig.bodyRim, points, rig.lightHex, 0.1);
-  drawBlob(rig.bodyDepth, innerPoints, rig.darkHex, 0.26);
-  rig.bodyDepth.position.set(0, 35);
-  rig.sheen.clear();
-  rig.sheen.ellipse(-26, -40, 62, 27).fill({ color: 0xffffff, alpha: 0.28 });
-  rig.sheen.ellipse(6, -30, 48, 18).fill({ color: 0xffffff, alpha: 0.1 });
-  rig.sheen.rotation = Math.sin(rig.wobblePhase * 0.7) * 0.04;
-}
-
-/* ===============================
-   AURA
-   =============================== */
-
-function drawAura(rig: StageRig): void {
-  rig.auraGlow.clear();
-  if (!rig.ultimate.active && rig.ultimate.auraT <= 0) {
-    rig.auraGlow.visible = false;
-    rig.auraRing.visible = false;
-    return;
-  }
-  const alpha = rig.ultimate.phase === 'afterglow'
-    ? Math.min(0.3, (rig.ultimate.auraT / 5000) * 0.3)
-    : rig.ultimate.phase === 'explode' ? 0.4 : 0.2;
-  rig.auraGlow.visible = true;
-  rig.auraGlow.ellipse(0, 0, 160, 120).fill({ color: rig.lightHex, alpha });
-  if (rig.ultimate.auraT > 0 || rig.ultimate.phase === 'afterglow') {
-    rig.auraRing.visible = true;
-    rig.auraRing.rotation += 0.015;
-  }
-}
-
-/* ===============================
-   VFX SPAWNERS
-   =============================== */
-
-function spawnParticles(
-  rig: StageRig,
-  count: number,
-  color: number,
-  type: 'sparkle' | 'star' | 'confetti' | 'ring' = 'sparkle',
-  opts?: { speedMin?: number; speedMax?: number; ttlMin?: number; ttlMax?: number; sizeMin?: number; sizeMax?: number },
-): void {
-  const sm = opts?.speedMin ?? 2.8;
-  const sx = opts?.speedMax ?? 6.1;
-  const tm = opts?.ttlMin ?? 600;
-  const tx = opts?.ttlMax ?? 1000;
-  const rm = opts?.sizeMin ?? 2;
-  const rx = opts?.sizeMax ?? 6;
-
-  for (let i = 0; i < count; i++) {
-    const p = new Graphics();
-    const r = rm + Math.random() * (rx - rm);
-    if (type === 'star') {
-      p.star(0, 0, 4, r, r * 0.4).fill({ color, alpha: 0.9 });
-    } else if (type === 'confetti') {
-      const w = 3 + Math.random() * 4;
-      const h = 2 + Math.random() * 3;
-      p.rect(-w / 2, -h / 2, w, h).fill({ color, alpha: 0.85 });
-      p.rotation = Math.random() * Math.PI * 2;
-    } else if (type === 'ring') {
-      p.circle(0, 0, r).stroke({ color, width: 2, alpha: 0.7 });
-    } else {
-      p.circle(0, 0, r).fill({ color, alpha: 0.9 });
+    const breathe = 1 + Math.sin(t * 1.8) * 0.018;
+    if (rootRef.current) {
+      rootRef.current.position.copy(currentPosRef.current);
+      rootRef.current.scale.set(
+        currentScaleRef.current.x * breathe,
+        currentScaleRef.current.y / breathe,
+        currentScaleRef.current.z,
+      );
+      rootRef.current.rotation.z = Math.sin(t * 1.2) * 0.05;
+      rootRef.current.rotation.x = Math.sin(t * 0.95) * 0.04;
     }
-    p.position.set(rig.currentX, rig.currentY);
-    rig.root.addChild(p);
-    const angle = Math.random() * Math.PI * 2;
-    const speed = sm + Math.random() * (sx - sm);
-    rig.particles.push({
-      g: p,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 1.8,
-      ttl: tm + Math.random() * (tx - tm),
-      age: 0,
-      type,
-    });
-  }
-}
 
-/* ===============================
-   COMPONENT
-   =============================== */
+    deformFrameRef.current += 1;
+    if (deformFrameRef.current % preset.deformEvery === 0) {
+      const displacement = 0.022 + Math.sin(t * 1.7) * 0.006 + burstGlowRef.current * 0.018;
+      const positionAttr = geometry.attributes.position as THREE.BufferAttribute;
+      const arr = positionAttr.array as Float32Array;
+      for (let i = 0; i < arr.length; i += 3) {
+        const bx = basePositions[i];
+        const by = basePositions[i + 1];
+        const bz = basePositions[i + 2];
+        const nx = normals[i];
+        const ny = normals[i + 1];
+        const nz = normals[i + 2];
 
-export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStageProps>(
-  function PixiSlimeStage({ slime, onInteract }, ref) {
-    const hostRef = useRef<HTMLDivElement | null>(null);
-    const rigRef = useRef<StageRig | null>(null);
-    const moodRef = useRef<string>('Chill');
+        const waveA = Math.sin(t * 2.2 + nx * 4.2 + ny * 5.8 + nz * 3.7) * displacement;
+        const waveB = Math.cos(t * 3.1 + nx * 6.5 - ny * 4.1 + nz * 6.8) * displacement * 0.42;
+        const radiusScale = 1 + waveA + waveB;
 
-    useImperativeHandle(ref, () => ({
-      poke: () => doAction('poke'),
-      squish: () => doAction('squish'),
-      stretch: () => doAction('stretch'),
-      bounce: () => bounceEffect(),
-      megaMorph: () => megaEffect(),
-      burst: (count = 8) => spawnBurst(count),
-      setMood: (mood: string) => { moodRef.current = mood; },
-    }));
+        arr[i] = bx * radiusScale;
+        arr[i + 1] = by * (1 + waveA * 0.75 + waveB * 0.42);
+        arr[i + 2] = bz * (1 + waveA * 0.8 + waveB * 0.56);
+      }
+      positionAttr.needsUpdate = true;
+      geometry.computeVertexNormals();
+    }
 
-    useEffect(() => {
-      let ignore = false;
-      let mountedApp: Application | null = null;
-      let resizeObserver: ResizeObserver | null = null;
+    const eyeLookX = clamp(pointer.x * 0.05, -0.045, 0.045);
+    const eyeLookY = clamp(pointer.y * 0.03, -0.03, 0.03);
+    if (leftPupilRef.current) leftPupilRef.current.position.set(-0.33 + eyeLookX, 0.14 + eyeLookY, 0.95);
+    if (rightPupilRef.current) rightPupilRef.current.position.set(0.33 + eyeLookX, 0.14 + eyeLookY, 0.95);
 
-      async function mount(): Promise<void> {
-        if (!hostRef.current || !slime) return;
+    if (mouthRef.current) {
+      mouthRef.current.scale.set(1 + burstGlowRef.current * 0.45, 1 + burstGlowRef.current * 0.2, 1);
+      mouthRef.current.rotation.z = Math.sin(t * 1.7) * 0.08;
+    }
 
-        const width = clamp(Math.round(hostRef.current.clientWidth || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
-        const height = clamp(Math.round(width * STAGE_ASPECT), 250, 390);
+    if (sparkleRef.current) {
+      sparkleRef.current.rotation.y += delta * (quality === 'ultra' ? 0.36 : quality === 'balanced' ? 0.24 : 0.16);
+      sparkleRef.current.children.forEach((child, index) => {
+        child.position.y += Math.sin(t * 1.8 + index * 1.7) * 0.0009;
+        const mesh = child as THREE.Mesh;
+        const material = mesh.material as THREE.MeshStandardMaterial;
+        material.emissiveIntensity = 0.42 + Math.sin(t * 2.4 + index) * 0.2 + burstGlowRef.current * 0.4;
+      });
+    }
 
-        const app = new Application();
-        await app.init({
-          width, height,
-          backgroundAlpha: 0,
-          antialias: true,
-          resolution: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
-          autoDensity: true,
-        });
+    for (let i = burstParticlesRef.current.length - 1; i >= 0; i -= 1) {
+      const particle = burstParticlesRef.current[i];
+      particle.life += delta;
+      particle.mesh.position.addScaledVector(particle.velocity, delta * 2.1);
+      particle.velocity.y -= delta * 0.9;
+      const lifeRatio = clamp(particle.life / particle.ttl, 0, 1);
+      particle.material.opacity = 1 - lifeRatio;
+      const scale = 0.72 + lifeRatio * 1.2;
+      particle.mesh.scale.setScalar(scale);
+      if (lifeRatio >= 1) {
+        particle.mesh.removeFromParent();
+        particle.material.dispose();
+        burstParticlesRef.current.splice(i, 1);
+      }
+    }
 
-        if (ignore || !hostRef.current) { app.destroy(true); return; }
-        mountedApp = app;
-        hostRef.current.innerHTML = '';
-        hostRef.current.appendChild(app.canvas as HTMLCanvasElement);
+    if (outerRef.current) {
+      const material = outerRef.current.material as THREE.MeshPhysicalMaterial;
+      material.clearcoat = clamp(0.8 + burstGlowRef.current * 0.65, 0.8, 1);
+      material.sheen = clamp(0.42 + burstGlowRef.current * 0.5, 0.42, 0.95);
+      material.sheenRoughness = clamp(0.38 - burstGlowRef.current * 0.2, 0.16, 0.38);
+    }
+    if (rimRef.current) {
+      const material = rimRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = clamp(0.14 + burstGlowRef.current * 0.28, 0.14, 0.42);
+    }
+    burstGlowRef.current = Math.max(0, burstGlowRef.current - delta * 1.8);
+  });
 
-        const personality = getPersonality(slime.id ?? slime.name);
-        const root = new Container();
-        app.stage.addChild(root);
+  const baseColor = hexToColor(slime.color);
+  const innerColor = darken(slime.color, 0.28);
+  const rimColor = lighten(slime.color, 0.7);
 
-        const centerX = width * 0.5;
-        const centerY = height * 0.58;
+  return (
+    <>
+      <color attach="background" args={['#000000']} />
 
-        // Ground shadow
-        const groundShadow = new Graphics();
-        groundShadow.ellipse(0, 0, 92, 26).fill({ color: 0x000000, alpha: 0.22 });
-        groundShadow.filters = [new BlurFilter({ strength: 6 })];
-        groundShadow.position.set(centerX, centerY + 95);
-        root.addChild(groundShadow);
+      <ambientLight intensity={quality === 'ultra' ? 0.62 : quality === 'balanced' ? 0.56 : 0.5} />
+      <directionalLight
+        position={[2.6, 2.2, 2.5]}
+        intensity={quality === 'ultra' ? 1.15 : quality === 'balanced' ? 0.92 : 0.75}
+        color="#f4f8ff"
+      />
+      <directionalLight
+        position={[-2.2, -1.5, 1.7]}
+        intensity={quality === 'ultra' ? 0.45 : quality === 'balanced' ? 0.3 : 0.22}
+        color="#9bc8ff"
+      />
+      <pointLight
+        position={[0, 1.7, 2.4]}
+        intensity={quality === 'ultra' ? 1.1 : quality === 'balanced' ? 0.82 : 0.62}
+        color="#ffd6f8"
+      />
 
-        // Aura glow (behind slime)
-        const auraGlow = new Graphics();
-        auraGlow.visible = false;
-        auraGlow.position.set(centerX, centerY);
-        root.addChild(auraGlow);
+      <mesh position={[0, -1.5, -0.2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.52, 64]} />
+        <meshBasicMaterial color="#000000" transparent opacity={0.2} />
+      </mesh>
 
-        // Aura ring
-        const auraRing = new Container();
-        auraRing.visible = false;
-        for (let i = 0; i < 8; i++) {
-          const dot = new Graphics();
-          const angle = (i / 8) * Math.PI * 2;
-          dot.circle(0, 0, 3).fill({ color: 0xffeaa7, alpha: 0.6 });
-          dot.position.set(Math.cos(angle) * 140, Math.sin(angle) * 105);
-          auraRing.addChild(dot);
-        }
-
-        // Slime container
-        const slimeContainer = new Container();
-        slimeContainer.position.set(centerX, centerY);
-        root.addChild(slimeContainer);
-        slimeContainer.addChild(auraRing);
-
-        const bodyFill = new Graphics();
-        const bodyRim = new Graphics();
-        const bodyDepth = new Graphics();
-        const sheen = new Graphics();
-        slimeContainer.addChild(bodyFill, bodyRim, bodyDepth, sheen);
-
-        // Cheeks
-        const leftCheek = new Graphics();
-        const rightCheek = new Graphics();
-        slimeContainer.addChild(leftCheek, rightCheek);
-
-        // Eyes
-        const leftEyeWhite = new Graphics();
-        const rightEyeWhite = new Graphics();
-        slimeContainer.addChild(leftEyeWhite, rightEyeWhite);
-
-        const leftPupil = new Graphics();
-        leftPupil.position.set(-34, -15);
-        const rightPupil = new Graphics();
-        rightPupil.position.set(34, -15);
-        slimeContainer.addChild(leftPupil, rightPupil);
-
-        // Brows
-        const leftBrow = new Graphics();
-        const rightBrow = new Graphics();
-        slimeContainer.addChild(leftBrow, rightBrow);
-
-        // Mouth
-        const mouth = new Graphics();
-        mouth.position.set(0, 22);
-        slimeContainer.addChild(mouth);
-
-        // Sparkles
-        const sparkleContainer = new Container();
-        slimeContainer.addChild(sparkleContainer);
-        const sparkle = findSparkle(slime.sparkle);
-        if (sparkle && sparkle.id !== 'none') {
-          for (let i = 0; i < 10; i++) {
-            const dot = new Graphics();
-            const size = 2 + Math.random() * 3;
-            dot.circle(0, 0, size).fill({ color: hexToNumber(sparkle.color ?? '#dfe6e9'), alpha: 0.7 });
-            dot.position.set(-68 + Math.random() * 136, -48 + Math.random() * 82);
-            sparkleContainer.addChild(dot);
-          }
-        }
-
-        // Charm
-        const charm = findCharm(slime.charm);
-        if (charm && charm.id !== 'none') {
-          const charmText = new Text({
-            text: charm.emoji,
-            style: { fontSize: 30, fontFamily: 'Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif' },
-          });
-          charmText.anchor.set(0.5);
-          charmText.position.set(64, -60);
-          slimeContainer.addChild(charmText);
-        }
-
-        // VFX container
-        const vfxContainer = new Container();
-        root.addChild(vfxContainer);
-
-        app.stage.eventMode = 'static';
-        app.stage.hitArea = new Rectangle(0, 0, width, height);
-        slimeContainer.eventMode = 'static';
-        slimeContainer.cursor = 'grab';
-
-        const rig: StageRig = {
-          app, width, height, root,
-          slime: slimeContainer, vfxContainer, groundShadow,
-          bodyFill, bodyRim, bodyDepth, sheen,
-          leftEyeWhite, rightEyeWhite, leftPupil, rightPupil,
-          leftBrow, rightBrow, leftCheek, rightCheek,
-          mouth, sparkleContainer, auraGlow, auraRing,
-          particles: [],
-          centerX, centerY,
-          targetX: centerX, targetY: centerY,
-          currentX: centerX, currentY: centerY,
-          targetScaleX: 1, targetScaleY: 1,
-          currentScaleX: 1, currentScaleY: 1,
-          isDragging: false, dragOffsetX: 0, dragOffsetY: 0,
-          wobblePhase: Math.random() * Math.PI * 2,
-          colorHex: hexToNumber(slime.color),
-          lightHex: lightenHex(slime.color, 46),
-          darkHex: darkenHex(slime.color, 42),
-          personality,
-          action: { ...noAction },
-          ultimate: { active: false, phase: 'idle', t: 0, auraT: 0 },
-          expression: {
-            blinkProgress: 0, blinkTimer: personality.blinkInterval,
-            isBlinking: false, currentExpression: 'calm',
-          },
-          shake: createShake(0),
-          megaText: null,
-        };
-        rigRef.current = rig;
-
-        // Initial draw
-        drawBody(rig, 0.035);
-        drawEyes(rig);
-        drawMouthShape(rig.mouth, rig.personality, 'calm', false);
-        drawBrows(rig);
-        drawCheeks(rig);
-
-        /* ---- Events ---- */
-
-        const setPupilLook = (x: number, y: number): void => {
-          const dx = clamp((x - rig.currentX) * 0.05, -4, 4);
-          const dy = clamp((y - rig.currentY) * 0.05, -4, 4);
-          rig.leftPupil.position.set(-34 + dx, -15 + dy);
-          rig.rightPupil.position.set(34 + dx, -15 + dy);
-        };
-
-        const onPointerDown = (event: FederatedPointerEvent): void => {
-          rig.isDragging = true;
-          const { x, y } = event.global;
-          rig.dragOffsetX = x - rig.targetX;
-          rig.dragOffsetY = y - rig.targetY;
-          rig.targetScaleX = 1.08;
-          rig.targetScaleY = 0.92;
+      <group
+        ref={rootRef}
+        position={[0, -0.02, 0]}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          isDraggingRef.current = true;
           spawnBurst(3);
           onInteract?.('drag');
-        };
+        }}
+      >
+        <group ref={particleLayerRef} />
 
-        const onPointerMove = (event: FederatedPointerEvent): void => {
-          const { x, y } = event.global;
-          setPupilLook(x, y);
-          if (!rig.isDragging) return;
-          rig.targetX = clamp(x - rig.dragOffsetX, 90, rig.width - 90);
-          rig.targetY = clamp(y - rig.dragOffsetY, 90, rig.height - 70);
-          const dx = rig.targetX - rig.centerX;
-          const dy = rig.targetY - rig.centerY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const stretchAmt = clamp(1 + dist / 340, 1, 1.45);
-          const squishAmt = clamp(1 - dist / 620, 0.76, 1);
-          const horiz = Math.abs(dx) > Math.abs(dy);
-          rig.targetScaleX = horiz ? stretchAmt : squishAmt;
-          rig.targetScaleY = horiz ? squishAmt : stretchAmt;
-        };
+        <mesh ref={rimRef} geometry={rimGeometry}>
+          <meshBasicMaterial
+            color={rimColor}
+            transparent
+            opacity={0.14}
+            side={THREE.BackSide}
+            depthWrite={false}
+          />
+        </mesh>
 
-        const onPointerUp = (): void => {
-          if (!rig.isDragging) return;
-          rig.isDragging = false;
-          rig.targetX = rig.centerX;
-          rig.targetY = rig.centerY;
-          rig.targetScaleX = 1;
-          rig.targetScaleY = 1;
-          drawMouthShape(rig.mouth, rig.personality, rig.expression.currentExpression, true);
-          setTimeout(() => {
-            const r = rigRef.current;
-            if (r) drawMouthShape(r.mouth, r.personality, r.expression.currentExpression, false);
-          }, 300);
-          onInteract?.('drag');
-        };
+        <mesh ref={outerRef} geometry={geometry}>
+          {quality === 'battery' ? (
+            <meshPhysicalMaterial
+              transmission={0.86}
+              thickness={0.95}
+              roughness={0.12}
+              clearcoat={0.9}
+              clearcoatRoughness={0.2}
+              ior={1.16}
+              transparent
+              opacity={0.95}
+              color={baseColor}
+              attenuationColor={baseColor}
+              attenuationDistance={1.1}
+            />
+          ) : (
+            <MeshTransmissionMaterial
+              backside
+              thickness={1.2}
+              roughness={preset.roughness}
+              samples={preset.transmissionSamples}
+              chromaticAberration={preset.chromaticAberration}
+              anisotropicBlur={preset.anisotropicBlur}
+              distortion={preset.distortion}
+              distortionScale={preset.distortionScale}
+              temporalDistortion={preset.temporalDistortion}
+              clearcoat={1}
+              clearcoatRoughness={0.12}
+              ior={1.17}
+              color={baseColor}
+              attenuationColor={baseColor}
+              attenuationDistance={0.9}
+            />
+          )}
+        </mesh>
 
-        slimeContainer.on('pointerdown', onPointerDown);
-        app.stage.on('pointermove', onPointerMove);
-        app.stage.on('pointerup', onPointerUp);
-        app.stage.on('pointerupoutside', onPointerUp);
+        <mesh ref={innerRef} geometry={innerGeometry} position={[0, 0.05, -0.04]}>
+          <meshPhysicalMaterial
+            color={innerColor}
+            transparent
+            opacity={0.3}
+            roughness={0.28}
+            metalness={0.04}
+            clearcoat={0.5}
+            clearcoatRoughness={0.25}
+          />
+        </mesh>
 
-        /* ---- Main loop ---- */
+        <group ref={sparkleRef}>
+          {sparklePoints.map((point, index) => (
+            <mesh key={index} position={point}>
+              <sphereGeometry args={[0.05, preset.sparkleSegments, preset.sparkleSegments]} />
+              <meshStandardMaterial
+                color={sparkle?.color ?? '#dfe6e9'}
+                emissive={sparkle?.color ?? '#ffffff'}
+                emissiveIntensity={quality === 'ultra' ? 0.5 : quality === 'balanced' ? 0.42 : 0.34}
+                transparent
+                opacity={0.8}
+                roughness={0.2}
+                metalness={0.1}
+              />
+            </mesh>
+          ))}
+        </group>
 
-        app.ticker.add((ticker) => {
-          if (!rigRef.current) return;
-          const dt = ticker.deltaMS;
-          const step = dt / 16.666;
+        {charmTexture && (
+          <sprite position={[0.63, 0.63, 0.28]} scale={[0.5, 0.5, 0.5]}>
+            <spriteMaterial map={charmTexture} transparent depthWrite={false} />
+          </sprite>
+        )}
 
-          rig.wobblePhase += 0.05 * step * rig.personality.wobbleSpeed;
+        <mesh position={[-0.33, 0.16, 0.9]}>
+          <sphereGeometry args={[0.14, 24, 24]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.2} metalness={0} />
+        </mesh>
+        <mesh position={[0.33, 0.16, 0.9]}>
+          <sphereGeometry args={[0.14, 24, 24]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.2} metalness={0} />
+        </mesh>
+        <mesh ref={leftPupilRef} position={[-0.33, 0.14, 0.95]}>
+          <sphereGeometry args={[0.058, 20, 20]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.42} />
+        </mesh>
+        <mesh ref={rightPupilRef} position={[0.33, 0.14, 0.95]}>
+          <sphereGeometry args={[0.058, 20, 20]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.42} />
+        </mesh>
 
-          rig.currentX += (rig.targetX - rig.currentX) * 0.2 * step;
-          rig.currentY += (rig.targetY - rig.currentY) * 0.2 * step;
-          rig.currentScaleX += (rig.targetScaleX - rig.currentScaleX) * 0.2 * step;
-          rig.currentScaleY += (rig.targetScaleY - rig.currentScaleY) * 0.2 * step;
+        <mesh ref={mouthRef} position={[0, -0.28, 0.9]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.2, 0.03, 16, 48, Math.PI]} />
+          <meshStandardMaterial color="#2d3436" roughness={0.45} />
+        </mesh>
+      </group>
+    </>
+  );
+};
 
-          const breathing = 1 + Math.sin(rig.wobblePhase) * 0.02;
+export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStageProps>(
+  function PixiSlimeStage({ slime, onInteract, quality }, ref) {
+    const controlsRef = useRef<StageControls | null>(null);
+    const preset = QUALITY_PRESETS[quality];
 
-          updateShake(rig.shake);
-          rig.slime.position.set(rig.currentX + rig.shake.offsetX, rig.currentY + rig.shake.offsetY);
-          rig.slime.scale.set(rig.currentScaleX * breathing, rig.currentScaleY / breathing);
+    useImperativeHandle(
+      ref,
+      () => ({
+        poke: () => controlsRef.current?.poke(),
+        squish: () => controlsRef.current?.squish(),
+        stretch: () => controlsRef.current?.stretch(),
+        bounce: () => controlsRef.current?.bounce(),
+        megaMorph: () => controlsRef.current?.megaMorph(),
+        burst: (count?: number) => controlsRef.current?.burst(count),
+      }),
+      [],
+    );
 
-          const wobbleStrength = rig.isDragging
-            ? 0.065
-            : (rig.ultimate.auraT > 0 ? 0.05 : 0.032) + Math.sin(rig.wobblePhase * 1.4) * 0.008;
-          drawBody(rig, wobbleStrength);
+    if (!slime) return <div className="pixi-host" />;
 
-          // Shadow
-          const shadowScaleX = clamp(1 + (rig.currentScaleX - 1) * 0.28, 0.75, 1.45);
-          const shadowScaleY = clamp(1 + (1 - rig.currentScaleY) * 0.4, 0.7, 1.35);
-          rig.groundShadow.position.set(rig.currentX + rig.shake.offsetX, rig.currentY + 95 + rig.shake.offsetY);
-          rig.groundShadow.scale.set(shadowScaleX, shadowScaleY);
-          rig.groundShadow.alpha = 0.18 + Math.min(0.18, Math.abs(rig.currentY - rig.centerY) / 240);
-
-          // Sparkle pulse
-          rig.sparkleContainer.children.forEach((child, idx) => {
-            child.alpha = 0.42 + Math.sin(rig.wobblePhase * 1.6 + idx) * 0.3;
-          });
-
-          // ---- Blink ----
-          rig.expression.blinkTimer -= dt;
-          if (rig.expression.blinkTimer <= 0 && !rig.expression.isBlinking) {
-            rig.expression.isBlinking = true;
-            rig.expression.blinkProgress = 0;
-          }
-          if (rig.expression.isBlinking) {
-            rig.expression.blinkProgress += dt / 120;
-            if (rig.expression.blinkProgress >= 2) {
-              rig.expression.isBlinking = false;
-              rig.expression.blinkProgress = 0;
-              rig.expression.blinkTimer = rig.personality.blinkInterval + rand(-800, 800);
-            } else if (rig.expression.blinkProgress > 1) {
-              rig.expression.blinkProgress = 2 - rig.expression.blinkProgress;
-            }
-          }
-          drawEyes(rig);
-
-          // ---- Expression from mood ----
-          const newExpr = moodToExpression(moodRef.current);
-          if (newExpr !== rig.expression.currentExpression) {
-            rig.expression.currentExpression = newExpr;
-            drawMouthShape(rig.mouth, rig.personality, newExpr, false);
-            drawBrows(rig);
-            drawCheeks(rig);
-            const sc = slime ? findSparkle(slime.sparkle) : undefined;
-            spawnParticles(rig, 4, sc?.color ? hexToNumber(sc.color) : rig.lightHex, 'sparkle', { speedMin: 1, speedMax: 3, ttlMin: 400, ttlMax: 600, sizeMin: 2, sizeMax: 4 });
-          }
-
-          // ---- Action timer ----
-          if (rig.action.kind) {
-            rig.action.t += dt;
-            if (rig.action.t >= rig.action.duration) rig.action.kind = null;
-          }
-
-          // ---- Ultimate phases ----
-          if (rig.ultimate.active) {
-            rig.ultimate.t += dt;
-            const ult = rig.ultimate;
-            if (ult.phase === 'charge' && ult.t >= 600) {
-              ult.phase = 'explode';
-              ult.t = 0;
-              rig.targetScaleX = 1.5;
-              rig.targetScaleY = 0.55;
-              rig.shake = createShake(6);
-              playSfx('ultimate');
-              spawnParticles(rig, 20, 0xffeaa7, 'confetti', { speedMin: 3, speedMax: 8, ttlMin: 800, ttlMax: 1400 });
-              spawnParticles(rig, 12, 0xf093fb, 'star', { speedMin: 2, speedMax: 6, ttlMin: 600, ttlMax: 1000 });
-              spawnParticles(rig, 8, rig.lightHex, 'ring', { speedMin: 1, speedMax: 4, ttlMin: 500, ttlMax: 800, sizeMin: 8, sizeMax: 16 });
-              if (!rig.megaText) {
-                const mt = new Text({
-                  text: 'MEGA SLIME!!',
-                  style: { fontSize: 36, fontFamily: 'Fredoka, sans-serif', fontWeight: '700', fill: 0xffeaa7, dropShadow: { color: 0x000000, alpha: 0.4, blur: 8, distance: 3 } },
-                });
-                mt.anchor.set(0.5);
-                mt.position.set(rig.centerX, rig.centerY - 130);
-                rig.root.addChild(mt);
-                rig.megaText = mt;
-              }
-            } else if (ult.phase === 'explode' && ult.t >= 400) {
-              ult.phase = 'afterglow';
-              ult.t = 0;
-              ult.auraT = 8000;
-              ult.active = false;
-              rig.targetScaleX = 1;
-              rig.targetScaleY = 1;
-              if (rig.megaText) {
-                const mt = rig.megaText;
-                setTimeout(() => { mt.destroy(); if (rigRef.current) rigRef.current.megaText = null; }, 1200);
-              }
-            } else if (ult.phase === 'charge') {
-              const cp = ult.t / 600;
-              rig.targetScaleX = lerp(1, 0.85, cp);
-              rig.targetScaleY = lerp(1, 1.1, cp);
-              if (Math.random() < 0.15 * step) {
-                spawnParticles(rig, 1, 0xffeaa7, 'sparkle', { speedMin: 0.5, speedMax: 2, ttlMin: 300, ttlMax: 500 });
-              }
-            }
-          }
-
-          // Aura decay
-          if (rig.ultimate.auraT > 0) {
-            rig.ultimate.auraT -= dt;
-            if (rig.ultimate.auraT <= 0) { rig.ultimate.auraT = 0; rig.ultimate.phase = 'idle'; }
-            if (Math.random() < 0.04 * step) {
-              spawnParticles(rig, 1, 0xffeaa7, 'sparkle', { speedMin: 0.3, speedMax: 1.5, ttlMin: 400, ttlMax: 700 });
-            }
-          }
-
-          drawAura(rig);
-
-          // Mega text float
-          if (rig.megaText) {
-            rig.megaText.scale.set(1 + Math.sin(rig.wobblePhase * 3) * 0.04);
-            rig.megaText.alpha = Math.min(1, rig.megaText.alpha + 0.05);
-          }
-
-          // ---- Particles ----
-          for (let i = rig.particles.length - 1; i >= 0; i--) {
-            const particle = rig.particles[i];
-            particle.age += dt;
-            const progress = particle.age / particle.ttl;
-            particle.g.x += particle.vx * step;
-            particle.g.y += particle.vy * step;
-            particle.vy += 0.11 * step;
-            particle.g.alpha = Math.max(0, 1 - progress);
-            particle.g.scale.set(Math.max(0.18, 1 - progress * 0.9));
-            if (particle.type === 'confetti') particle.g.rotation += 0.1 * step;
-            if (progress >= 1) { particle.g.destroy(); rig.particles.splice(i, 1); }
-          }
-        });
-
-        // Resize observer
-        resizeObserver = new ResizeObserver((entries) => {
-          const entry = entries[0];
-          if (!entry || !rigRef.current) return;
-          const nw = clamp(Math.round(entry.contentRect.width || MAX_STAGE_WIDTH), 280, MAX_STAGE_WIDTH);
-          const nh = clamp(Math.round(nw * STAGE_ASPECT), 250, 390);
-          if (nw === rig.width && nh === rig.height) return;
-          rig.width = nw;
-          rig.height = nh;
-          rig.centerX = nw * 0.5;
-          rig.centerY = nh * 0.58;
-          rig.targetX = rig.centerX;
-          rig.targetY = rig.centerY;
-          rig.currentX = rig.centerX;
-          rig.currentY = rig.centerY;
-          app.renderer.resize(nw, nh);
-          app.stage.hitArea = new Rectangle(0, 0, nw, nh);
-          rig.slime.position.set(rig.centerX, rig.centerY);
-          rig.groundShadow.position.set(rig.centerX, rig.centerY + 95);
-          rig.auraGlow.position.set(rig.centerX, rig.centerY);
-        });
-        resizeObserver.observe(hostRef.current);
-      }
-
-      mount().catch((error) => console.error('Pixi stage mount failed:', error));
-      return () => {
-        ignore = true;
-        resizeObserver?.disconnect();
-        rigRef.current = null;
-        if (mountedApp) mountedApp.destroy(true);
-      };
-    }, [slime, onInteract]);
-
-    /* ---- Imperative methods ---- */
-
-    function spawnBurst(count = 8): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      const sparkleItem = slime ? findSparkle(slime.sparkle) : undefined;
-      const color = sparkleItem?.color ? hexToNumber(sparkleItem.color) : slime ? lightenHex(slime.color, 30) : 0xffffff;
-      const mult = rig.ultimate.auraT > 0 ? 2 : 1;
-      spawnParticles(rig, count * mult, color);
-    }
-
-    function doAction(kind: InteractionKind): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      playSfx(kind as 'poke' | 'squish' | 'stretch' | 'bounce');
-      rig.action = {
-        kind, t: 0,
-        duration: kind === 'poke' ? 500 : kind === 'squish' ? 600 : 550,
-        intensity: rig.personality.bounciness,
-        dirX: kind === 'stretch' ? (Math.random() > 0.5 ? 1 : -1) : 0,
-        dirY: kind === 'stretch' ? -0.5 : 0,
-      };
-      switch (kind) {
-        case 'poke': rig.targetScaleX = 0.82; rig.targetScaleY = 1.16; break;
-        case 'squish': rig.targetScaleX = 1.34; rig.targetScaleY = 0.68; break;
-        case 'stretch': rig.targetScaleX = 0.74; rig.targetScaleY = 1.28; break;
-      }
-      const isHappy = kind === 'squish' || kind === 'poke';
-      drawMouthShape(rig.mouth, rig.personality, rig.expression.currentExpression, isHappy);
-      spawnBurst(rig.ultimate.auraT > 0 ? 10 : 6);
-      onInteract?.(kind);
-      window.setTimeout(() => {
-        const r = rigRef.current;
-        if (!r || r.isDragging) return;
-        r.targetScaleX = 1;
-        r.targetScaleY = 1;
-        drawMouthShape(r.mouth, r.personality, r.expression.currentExpression, false);
-      }, 250);
-    }
-
-    function bounceEffect(): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      playSfx('bounce');
-      rig.action = { kind: 'bounce', t: 0, duration: 700, intensity: rig.personality.bounciness, dirX: 0, dirY: -1 };
-      rig.targetY = rig.centerY - 80 * rig.personality.bounciness;
-      rig.targetScaleX = 0.88;
-      rig.targetScaleY = 1.2;
-      spawnBurst(7);
-      onInteract?.('bounce');
-      setTimeout(() => {
-        const r = rigRef.current;
-        if (!r) return;
-        r.targetY = r.centerY;
-        r.targetScaleX = 1.18;
-        r.targetScaleY = 0.82;
-        r.shake = createShake(3);
-        drawMouthShape(r.mouth, r.personality, r.expression.currentExpression, true);
-        setTimeout(() => {
-          const f = rigRef.current;
-          if (!f || f.isDragging) return;
-          f.targetScaleX = 1;
-          f.targetScaleY = 1;
-          drawMouthShape(f.mouth, f.personality, f.expression.currentExpression, false);
-        }, 180);
-      }, 200);
-    }
-
-    function megaEffect(): void {
-      const rig = rigRef.current;
-      if (!rig) return;
-      rig.ultimate = { active: true, phase: 'charge', t: 0, auraT: 0 };
-      rig.action = { kind: 'mega', t: 0, duration: 1500, intensity: 1.5, dirX: 0, dirY: 0 };
-      drawMouthShape(rig.mouth, rig.personality, 'excited', true);
-      onInteract?.('mega');
-    }
-
-    return <div className="pixi-host" ref={hostRef} />;
+    return (
+      <div className="pixi-host">
+        <Canvas
+          gl={{
+            antialias: quality !== 'battery',
+            alpha: true,
+            powerPreference: quality === 'battery' ? 'low-power' : 'high-performance',
+          }}
+          dpr={preset.dpr}
+          camera={{ fov: 42, near: 0.1, far: 100, position: [0, 0.12, 4.1] }}
+          style={{ background: 'transparent' }}
+        >
+          <SlimeScene
+            slime={slime}
+            onInteract={onInteract}
+            quality={quality}
+            onReady={(controls) => {
+              controlsRef.current = controls;
+            }}
+          />
+        </Canvas>
+      </div>
+    );
   },
 );

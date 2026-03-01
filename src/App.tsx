@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
-import { PixiSlimeStage, type PixiSlimeStageHandle } from './components/PixiSlimeStage';
-import { GameButton } from './components/ui/GameButton';
-import { GlassCard } from './components/ui/GlassCard';
-import { TopHUD } from './components/ui/TopHUD';
+import type { PixiSlimeStageHandle, RenderQuality } from './components/PixiSlimeStage';
 import {
   ALL_CHARMS,
   ALL_COLORS,
@@ -15,12 +21,20 @@ import {
   findCharm,
   findSparkle,
 } from './gameData';
-import { generateShareCode, formatShareCode, normalizeShareCode } from './game/share';
 import { supabase } from './lib/supabase';
 import type { CharmItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from './types';
 
 type Screen = 'auth' | 'home' | 'create' | 'collection' | 'friends' | 'shop' | 'play';
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega' | 'bubble';
+type QualityMode = 'auto' | RenderQuality;
+
+const SlimeStage3D = lazy(async () => {
+  const module = await import('./components/PixiSlimeStage');
+  return { default: module.PixiSlimeStage };
+});
+
+const QUALITY_MODES: QualityMode[] = ['auto', 'ultra', 'balanced', 'battery'];
+const QUALITY_STORAGE_KEY = 'slime-render-quality-v1';
 
 interface CreateOptions {
   color: string;
@@ -34,7 +48,6 @@ interface Bubble {
   left: number;
   size: number;
   durationMs: number;
-  type: 'normal' | 'golden' | 'tiny';
 }
 
 interface BubbleRushState {
@@ -44,7 +57,6 @@ interface BubbleRushState {
   endsAt: number;
   spawnTimer: number | null;
   countdownTimer: number | null;
-  totalCoins: number;
 }
 
 interface PlayHud {
@@ -52,30 +64,6 @@ interface PlayHud {
   combo: number;
   mood: PlayMood;
   status: string;
-}
-
-interface ShareModal {
-  visible: boolean;
-  slimeId: string | null;
-  shareCode: string | null;
-  loading: boolean;
-}
-
-interface RedeemState {
-  code: string;
-  loading: boolean;
-  result: SharedSlimeData | null;
-  error: string | null;
-}
-
-interface SharedSlimeData {
-  id: string;
-  name: string;
-  color: string;
-  sparkle: string;
-  charm: string;
-  share_code: string;
-  creator_name: string;
 }
 
 const initialPlayHud: PlayHud = {
@@ -92,19 +80,53 @@ const initialBubbleRush: BubbleRushState = {
   endsAt: 0,
   spawnTimer: null,
   countdownTimer: null,
-  totalCoins: 0,
 };
 
 const IS_IOS =
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-/* ===============================
-   UTILITIES
-   =============================== */
+function isQualityMode(value: string | null): value is QualityMode {
+  return value === 'auto' || value === 'ultra' || value === 'balanced' || value === 'battery';
+}
+
+function qualityLabel(quality: RenderQuality): string {
+  if (quality === 'ultra') return 'Ultra';
+  if (quality === 'balanced') return 'Balanced';
+  return 'Battery Saver';
+}
+
+function detectAutoQuality(): RenderQuality {
+  const cores = navigator.hardwareConcurrency ?? 4;
+  const dpr = window.devicePixelRatio ?? 1;
+  const memory = Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4);
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+
+  const lowPower = cores <= 4 || memory <= 3;
+  const midPower = cores <= 6 || memory <= 4;
+
+  if (IS_IOS) {
+    if (lowPower || dpr >= 3) return 'battery';
+    if (midPower) return 'balanced';
+    return 'ultra';
+  }
+
+  if (coarse) {
+    if (lowPower || dpr > 2.7) return 'battery';
+    if (midPower) return 'balanced';
+  }
+
+  if (cores >= 8 && memory >= 8) return 'ultra';
+  if (cores <= 4) return 'battery';
+  return 'balanced';
+}
 
 function normalizeUsername(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
 }
 
 function buildKidPassword(code: string): string {
@@ -179,7 +201,12 @@ function hashString(input: string): number {
   let hash = 2166136261;
   for (let i = 0; i < input.length; i += 1) {
     hash ^= input.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
   }
   return hash >>> 0;
 }
@@ -195,10 +222,6 @@ function makeBubbleId(): string {
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
-
-/* ===============================
-   MINI SLIME (CSS preview)
-   =============================== */
 
 function MiniSlime({
   color,
@@ -252,10 +275,6 @@ function MiniSlime({
   );
 }
 
-/* ===============================
-   MAIN APP
-   =============================== */
-
 export default function App() {
   const [screen, setScreen] = useState<Screen>('auth');
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -277,25 +296,12 @@ export default function App() {
 
   const [playHud, setPlayHud] = useState<PlayHud>(initialPlayHud);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  const [showUltimateText, setShowUltimateText] = useState(false);
+  const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
+  const [autoQuality, setAutoQuality] = useState<RenderQuality>('balanced');
 
   const [loadingCollection, setLoadingCollection] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  // Share state
-  const [shareModal, setShareModal] = useState<ShareModal>({
-    visible: false,
-    slimeId: null,
-    shareCode: null,
-    loading: false,
-  });
-  const [redeemState, setRedeemState] = useState<RedeemState>({
-    code: '',
-    loading: false,
-    result: null,
-    error: null,
-  });
 
   const pixiRef = useRef<PixiSlimeStageHandle | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -307,23 +313,48 @@ export default function App() {
   const isOwnPlaySlimeRef = useRef(false);
   const screenRef = useRef<Screen>('auth');
 
-  const ownedColorSet = useMemo(() => new Set(profile?.owned_colors ?? []), [profile?.owned_colors]);
-  const ownedSparkleSet = useMemo(() => new Set(profile?.owned_sparkles ?? []), [profile?.owned_sparkles]);
-  const ownedCharmSet = useMemo(() => new Set(profile?.owned_charms ?? []), [profile?.owned_charms]);
+  const ownedColorSet = useMemo(
+    () => new Set(profile?.owned_colors ?? []),
+    [profile?.owned_colors],
+  );
+  const ownedSparkleSet = useMemo(
+    () => new Set(profile?.owned_sparkles ?? []),
+    [profile?.owned_sparkles],
+  );
+  const ownedCharmSet = useMemo(
+    () => new Set(profile?.owned_charms ?? []),
+    [profile?.owned_charms],
+  );
 
   const canMegaMorph = playHud.energy >= 100;
   const bubbleRushActive = bubbleRushRef.current.active;
   const coinBalance = profile?.coins ?? 0;
-
-  /* ---- Toast ---- */
+  const resolvedQuality: RenderQuality = qualityMode === 'auto' ? autoQuality : qualityMode;
+  const qualitySummary =
+    qualityMode === 'auto'
+      ? `Auto (${qualityLabel(autoQuality)})`
+      : qualityLabel(resolvedQuality);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     toastTimerRef.current = window.setTimeout(() => setToast(null), 2500);
   }, []);
 
-  /* ---- Profile persistence ---- */
+  const handleQualityModeChange = useCallback(
+    (mode: QualityMode) => {
+      setQualityMode(mode);
+      const effective = mode === 'auto' ? autoQuality : mode;
+      const message =
+        mode === 'auto'
+          ? `Render quality: Auto (${qualityLabel(autoQuality)})`
+          : `Render quality: ${qualityLabel(effective)}`;
+      showToast(message);
+    },
+    [autoQuality, showToast],
+  );
 
   const persistProfile = useCallback(async (nextProfile: Profile) => {
     const { error } = await supabase
@@ -335,7 +366,9 @@ export default function App() {
         owned_charms: nextProfile.owned_charms,
       })
       .eq('id', nextProfile.id);
-    if (error) console.error('Failed to save profile:', error);
+    if (error) {
+      console.error('Failed to save profile:', error);
+    }
   }, []);
 
   const updateProfile = useCallback(
@@ -351,8 +384,15 @@ export default function App() {
   );
 
   const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
-    if (error) { console.error('Failed loading profile:', error); return null; }
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) {
+      console.error('Failed loading profile:', error);
+      return null;
+    }
     if (!data) return null;
     return sanitizeProfile(data as Profile);
   }, []);
@@ -360,23 +400,39 @@ export default function App() {
   const ensureProfileExists = useCallback(
     async (username: string): Promise<Profile> => {
       const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) throw new Error('Could not verify your account.');
+      if (userError || !userData.user) {
+        throw new Error('Could not verify your account.');
+      }
       const user = userData.user;
+
       const existing = await fetchProfile(user.id);
       if (existing) return existing;
+
       const defaults = defaultProfile(user.id, username);
       const { error: insertError } = await supabase.from('profiles').insert(defaults);
-      if (insertError && !isAlreadyExistsError(insertError)) throw insertError;
+      if (insertError && !isAlreadyExistsError(insertError)) {
+        throw insertError;
+      }
+
       const created = await fetchProfile(user.id);
-      if (!created) throw new Error('Could not load your profile.');
+      if (!created) {
+        throw new Error('Could not load your profile.');
+      }
       return created;
     },
     [fetchProfile],
   );
 
   const loadMySlimes = useCallback(async (userId: string): Promise<Slime[]> => {
-    const { data, error } = await supabase.from('slimes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-    if (error) { console.error('Failed loading slimes:', error); return []; }
+    const { data, error } = await supabase
+      .from('slimes')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('Failed loading slimes:', error);
+      return [];
+    }
     return (data ?? []) as Slime[];
   }, []);
 
@@ -387,11 +443,12 @@ export default function App() {
       .neq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(60);
-    if (error) { console.error('Failed loading friends slimes:', error); return []; }
+    if (error) {
+      console.error('Failed loading friends slimes:', error);
+      return [];
+    }
     return (data ?? []) as Slime[];
   }, []);
-
-  /* ---- Play state ---- */
 
   const stopEnergyDecay = useCallback(() => {
     if (!energyDecayTimerRef.current) return;
@@ -405,9 +462,6 @@ export default function App() {
     const mood = computePlayMood(energy);
     const bubbleState = bubbleRushRef.current;
 
-    // Update pixi mood
-    pixiRef.current?.setMood(mood);
-
     let status = statusOverride;
     if (!status) {
       if (bubbleState.active) {
@@ -420,16 +474,22 @@ export default function App() {
         status = 'Charge up your slime for Mega Morph!';
       }
     }
+
     setPlayHud({ energy, combo, mood, status });
   }, []);
 
   const registerPlayAction = useCallback(
     (kind: InteractionKind, baseGain: number) => {
       const now = Date.now();
-      comboRef.current = now - lastActionAtRef.current < 1700 ? Math.min(comboRef.current + 1, 99) : 1;
+      comboRef.current =
+        now - lastActionAtRef.current < 1700
+          ? Math.min(comboRef.current + 1, 99)
+          : 1;
       lastActionAtRef.current = now;
+
       const comboBonus = Math.min(12, Math.floor(comboRef.current / 3));
       energyRef.current = clamp(energyRef.current + baseGain + comboBonus, 0, 100);
+
       if (kind === 'drag') {
         syncPlayHud('Sliiiime stretch!');
       } else {
@@ -453,8 +513,14 @@ export default function App() {
 
   const clearBubbleRushTimers = useCallback(() => {
     const state = bubbleRushRef.current;
-    if (state.spawnTimer) { window.clearInterval(state.spawnTimer); state.spawnTimer = null; }
-    if (state.countdownTimer) { window.clearInterval(state.countdownTimer); state.countdownTimer = null; }
+    if (state.spawnTimer) {
+      window.clearInterval(state.spawnTimer);
+      state.spawnTimer = null;
+    }
+    if (state.countdownTimer) {
+      window.clearInterval(state.countdownTimer);
+      state.countdownTimer = null;
+    }
   }, []);
 
   const awardCoins = useCallback(
@@ -477,14 +543,11 @@ export default function App() {
 
       if (success) {
         energyRef.current = clamp(energyRef.current + 18, 0, 100);
-        const totalCoins = 15 + state.totalCoins;
-        awardCoins(totalCoins, `Bubble Rush clear! Nice!`);
+        awardCoins(15, 'Bubble Rush clear!');
       } else if (!silent) {
-        if (state.totalCoins > 0) {
-          awardCoins(state.totalCoins, 'Bubble Rush');
-        }
         showToast('Bubble Rush over! Try again.');
       }
+
       syncPlayHud();
     },
     [awardCoins, clearBubbleRushTimers, showToast, syncPlayHud],
@@ -493,29 +556,11 @@ export default function App() {
   const spawnBubble = useCallback(() => {
     const state = bubbleRushRef.current;
     if (!state.active) return;
-
-    // Bubble type selection
-    const roll = Math.random();
-    let type: 'normal' | 'golden' | 'tiny' = 'normal';
-    let size = 24 + Math.random() * 46;
-    let durationMs = 2600 + Math.random() * 1800;
-
-    if (roll < 0.08) {
-      type = 'golden';
-      size = 34 + Math.random() * 30;
-      durationMs = 3000 + Math.random() * 1500;
-    } else if (roll < 0.25) {
-      type = 'tiny';
-      size = 18 + Math.random() * 16;
-      durationMs = 1800 + Math.random() * 1200;
-    }
-
     const bubble: Bubble = {
       id: makeBubbleId(),
       left: 5 + Math.random() * 90,
-      size,
-      durationMs,
-      type,
+      size: 24 + Math.random() * 46,
+      durationMs: 2600 + Math.random() * 1800,
     };
     setBubbles((current) => [...current, bubble]);
   }, []);
@@ -523,18 +568,21 @@ export default function App() {
   const startBubbleRush = useCallback(() => {
     const state = bubbleRushRef.current;
     if (state.active) return;
+
     state.active = true;
     state.popped = 0;
     state.target = 12;
     state.endsAt = Date.now() + 20000;
-    state.totalCoins = 0;
     setBubbles([]);
+
     syncPlayHud('Bubble Rush started! Pop 12 bubbles.');
     for (let i = 0; i < 4; i += 1) spawnBubble();
+
     state.spawnTimer = window.setInterval(() => {
       spawnBubble();
       if (Math.random() < 0.35) spawnBubble();
     }, 560);
+
     state.countdownTimer = window.setInterval(() => {
       if (Date.now() >= state.endsAt) {
         endBubbleRush(state.popped >= state.target);
@@ -551,7 +599,6 @@ export default function App() {
     energyRef.current = 0;
     comboRef.current = 0;
     lastActionAtRef.current = 0;
-    setShowUltimateText(false);
     syncPlayHud('Charge up your slime for Mega Morph!');
     startEnergyDecay();
   }, [clearBubbleRushTimers, startEnergyDecay, syncPlayHud]);
@@ -573,19 +620,24 @@ export default function App() {
   const goScreen = useCallback(
     (next: Screen) => {
       setScreen((current) => {
-        if (current === 'play' && next !== 'play') leavePlayMode();
+        if (current === 'play' && next !== 'play') {
+          leavePlayMode();
+        }
         return next;
       });
     },
     [leavePlayMode],
   );
 
-  /* ---- Pixi interaction ---- */
-
   const handlePixiInteract = useCallback(
     (kind: Exclude<InteractionKind, 'bubble'>) => {
       const gains: Record<Exclude<InteractionKind, 'bubble'>, number> = {
-        drag: 5, poke: 10, squish: 12, stretch: 11, bounce: 13, mega: 0,
+        drag: 5,
+        poke: 10,
+        squish: 12,
+        stretch: 11,
+        bounce: 13,
+        mega: 0,
       };
       registerPlayAction(kind, gains[kind]);
     },
@@ -593,16 +645,13 @@ export default function App() {
   );
 
   const handleBubblePop = useCallback(
-    (bubble: Bubble) => {
-      setBubbles((current) => current.filter((b) => b.id !== bubble.id));
+    (bubbleId: string) => {
+      setBubbles((current) => current.filter((bubble) => bubble.id !== bubbleId));
       const state = bubbleRushRef.current;
       if (!state.active) return;
 
-      const coinValue = bubble.type === 'golden' ? 5 : bubble.type === 'tiny' ? 2 : 1;
-      state.totalCoins += coinValue;
-
-      pixiRef.current?.burst(bubble.type === 'golden' ? 8 : 4);
-      registerPlayAction('bubble', bubble.type === 'golden' ? 14 : bubble.type === 'tiny' ? 6 : 9);
+      pixiRef.current?.burst(4);
+      registerPlayAction('bubble', 9);
       state.popped += 1;
       if (state.popped >= state.target) {
         endBubbleRush(true);
@@ -633,16 +682,12 @@ export default function App() {
     }
     pixiRef.current?.megaMorph();
     pixiRef.current?.burst(12);
-    awardCoins(15, 'Mega Morph');
+    awardCoins(5, 'Mega Morph');
     comboRef.current = 0;
     energyRef.current = 24;
     lastActionAtRef.current = Date.now();
-    setShowUltimateText(true);
-    syncPlayHud('MEGA MORPH unleashed!!');
-    setTimeout(() => setShowUltimateText(false), 2000);
+    syncPlayHud('Mega Morph unleashed!');
   }, [awardCoins, canMegaMorph, showToast, syncPlayHud]);
-
-  /* ---- CRUD ---- */
 
   const handleCreateSlime = useCallback(async () => {
     if (!profile) return;
@@ -659,6 +704,7 @@ export default function App() {
       showToast('Could not save slime. Try again.');
       return;
     }
+
     const created = data as Slime;
     setSlimes((current) => [created, ...current]);
     updateProfile((current) => ({ ...current, coins: current.coins + 10 }));
@@ -671,8 +717,12 @@ export default function App() {
     if (playSlime.user_id !== profile.id) return;
     const confirmed = window.confirm(`Delete ${playSlime.name}?`);
     if (!confirmed) return;
+
     const { error } = await supabase.from('slimes').delete().eq('id', playSlime.id);
-    if (error) { showToast('Could not delete slime.'); return; }
+    if (error) {
+      showToast('Could not delete slime.');
+      return;
+    }
     setSlimes((current) => current.filter((slime) => slime.id !== playSlime.id));
     setPlaySlime(null);
     goScreen('home');
@@ -683,139 +733,61 @@ export default function App() {
     (id: string, type: ShopType, price: number) => {
       if (!profile) return;
       const owned =
-        type === 'color' ? profile.owned_colors.includes(id)
-        : type === 'sparkle' ? profile.owned_sparkles.includes(id)
-        : profile.owned_charms.includes(id);
-      if (owned) { showToast('You already own that!'); return; }
-      if (profile.coins < price) { showToast('Need more coins!'); return; }
+        type === 'color'
+          ? profile.owned_colors.includes(id)
+          : type === 'sparkle'
+            ? profile.owned_sparkles.includes(id)
+            : profile.owned_charms.includes(id);
+
+      if (owned) {
+        showToast('You already own that!');
+        return;
+      }
+
+      if (profile.coins < price) {
+        showToast('Need more coins!');
+        return;
+      }
+
       updateProfile((current) => {
-        const next: Profile = { ...current, coins: current.coins - price };
+        const next: Profile = {
+          ...current,
+          coins: current.coins - price,
+          owned_colors: current.owned_colors,
+          owned_sparkles: current.owned_sparkles,
+          owned_charms: current.owned_charms,
+        };
         if (type === 'color') next.owned_colors = [...new Set([...current.owned_colors, id])];
         if (type === 'sparkle') next.owned_sparkles = [...new Set([...current.owned_sparkles, id])];
         if (type === 'charm') next.owned_charms = [...new Set([...current.owned_charms, id])];
         return next;
       });
+
       const item = [...ALL_COLORS, ...ALL_SPARKLES, ...ALL_CHARMS].find((entry) => entry.id === id);
       showToast(`Bought ${item?.name ?? 'item'}!`);
     },
     [profile, showToast, updateProfile],
   );
 
-  /* ---- Sharing ---- */
-
-  const handleCreateShare = useCallback(async (slimeId: string) => {
-    setShareModal({ visible: true, slimeId, shareCode: null, loading: true });
-    try {
-      const code = generateShareCode();
-      const { error } = await supabase.rpc('create_slime_share', {
-        p_slime_id: slimeId,
-        p_share_code: code,
-      });
-      if (error) {
-        // Fallback: try direct insert if RPC not available
-        const { error: insertError } = await supabase.from('slime_shares').insert({
-          slime_id: slimeId,
-          share_code: code,
-          created_by_profile_id: profile?.id,
-        });
-        if (insertError) {
-          showToast('Could not create share code. The sharing tables may not be set up yet.');
-          setShareModal((prev) => ({ ...prev, loading: false, visible: false }));
-          return;
-        }
-      }
-      setShareModal({ visible: true, slimeId, shareCode: code, loading: false });
-    } catch {
-      showToast('Could not create share code.');
-      setShareModal((prev) => ({ ...prev, loading: false, visible: false }));
-    }
-  }, [profile?.id, showToast]);
-
-  const handleRedeemCode = useCallback(async () => {
-    const code = normalizeShareCode(redeemState.code);
-    if (code.length < 6) {
-      setRedeemState((prev) => ({ ...prev, error: 'Code must be at least 6 characters.' }));
-      return;
-    }
-    setRedeemState((prev) => ({ ...prev, loading: true, error: null, result: null }));
-    try {
-      const { data, error } = await supabase.rpc('get_shared_slime', { p_share_code: code });
-      if (error) {
-        // Fallback: direct query
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('slime_shares')
-          .select('share_code, slimes(id, name, color, sparkle, charm), profiles!slime_shares_created_by_profile_id_fkey(username)')
-          .eq('share_code', code)
-          .eq('is_revoked', false)
-          .maybeSingle();
-
-        if (fallbackError || !fallbackData) {
-          setRedeemState((prev) => ({ ...prev, loading: false, error: 'Share code not found or expired.' }));
-          return;
-        }
-
-        const s = fallbackData.slimes as unknown as { id: string; name: string; color: string; sparkle: string; charm: string };
-        const p = fallbackData.profiles as unknown as { username: string };
-        setRedeemState((prev) => ({
-          ...prev,
-          loading: false,
-          result: {
-            id: s.id,
-            name: s.name,
-            color: s.color,
-            sparkle: s.sparkle,
-            charm: s.charm,
-            share_code: code,
-            creator_name: p?.username ?? 'friend',
-          },
-        }));
-        return;
-      }
-
-      setRedeemState((prev) => ({
-        ...prev,
-        loading: false,
-        result: data as SharedSlimeData,
-      }));
-    } catch {
-      setRedeemState((prev) => ({ ...prev, loading: false, error: 'Could not look up that code.' }));
-    }
-  }, [redeemState.code]);
-
-  const handlePlaySharedSlime = useCallback((shared: SharedSlimeData) => {
-    const fakeSlime: Slime = {
-      id: shared.id,
-      user_id: '__shared__',
-      name: shared.name,
-      color: shared.color,
-      sparkle: shared.sparkle,
-      charm: shared.charm,
-      profiles: { username: shared.creator_name },
-    };
-    openPlay(fakeSlime);
-  }, [openPlay]);
-
-  const handleCopyShareCode = useCallback((code: string) => {
-    const formatted = formatShareCode(code);
-    navigator.clipboard.writeText(formatted).then(
-      () => showToast('Code copied!'),
-      () => showToast(formatted),
-    );
-  }, [showToast]);
-
-  /* ---- Auth ---- */
-
   const signInOrCreate = useCallback(async () => {
     const username = normalizeUsername(authUsername);
     const code = authCode.trim();
+
     setAuthError('');
-    if (!username || username.length < 2) { setAuthError('Name must be at least 2 characters.'); return; }
-    if (!/^\d{4}$/.test(code)) { setAuthError('Kid code must be exactly 4 digits.'); return; }
+    if (!username || username.length < 2) {
+      setAuthError('Name must be at least 2 characters.');
+      return;
+    }
+    if (!/^\d{4}$/.test(code)) {
+      setAuthError('Kid code must be exactly 4 digits.');
+      return;
+    }
 
     setAuthBusy(true);
     try {
       const email = `${username}@slimemaker.game`;
       const password = buildKidPassword(code);
+
       let created = false;
       const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) {
@@ -823,7 +795,12 @@ export default function App() {
           setAuthError(getErrorMessage(signInError, 'Could not log in.'));
           return;
         }
-        const { error: signUpError } = await supabase.auth.signUp({ email, password, options: { data: { username } } });
+
+        const { error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { username } },
+        });
         if (signUpError) {
           if (isAlreadyExistsError(signUpError)) {
             setAuthError('That name exists with a different code.');
@@ -833,12 +810,14 @@ export default function App() {
           return;
         }
         created = true;
+
         const { error: secondSignInError } = await supabase.auth.signInWithPassword({ email, password });
         if (secondSignInError) {
           setAuthError(getErrorMessage(secondSignInError, 'Account created, but login failed.'));
           return;
         }
       }
+
       const ensuredProfile = await ensureProfileExists(username);
       setProfile(ensuredProfile);
       setSlimes(await loadMySlimes(ensuredProfile.id));
@@ -868,26 +847,57 @@ export default function App() {
     setAuthError('');
   }, [leavePlayMode]);
 
-  /* ---- Effects ---- */
+  useEffect(() => {
+    const saved = window.localStorage.getItem(QUALITY_STORAGE_KEY);
+    if (isQualityMode(saved)) {
+      setQualityMode(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(QUALITY_STORAGE_KEY, qualityMode);
+  }, [qualityMode]);
+
+  useEffect(() => {
+    const updateAutoQuality = () => {
+      setAutoQuality(detectAutoQuality());
+    };
+    updateAutoQuality();
+    window.addEventListener('resize', updateAutoQuality);
+    window.addEventListener('orientationchange', updateAutoQuality);
+    return () => {
+      window.removeEventListener('resize', updateAutoQuality);
+      window.removeEventListener('orientationchange', updateAutoQuality);
+    };
+  }, []);
 
   useEffect(() => {
     isOwnPlaySlimeRef.current = Boolean(profile && playSlime && playSlime.user_id === profile.id);
   }, [playSlime, profile]);
 
-  useEffect(() => { screenRef.current = screen; }, [screen]);
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
 
   useEffect(() => {
     if (!profile) return;
     if (screen === 'collection') {
       setLoadingCollection(true);
-      loadMySlimes(profile.id).then((items) => setSlimes(items)).finally(() => setLoadingCollection(false));
+      loadMySlimes(profile.id)
+        .then((items) => setSlimes(items))
+        .finally(() => setLoadingCollection(false));
     }
     if (screen === 'friends') {
       setLoadingFriends(true);
-      loadFriends(profile.id).then((items) => setFriendsSlimes(items)).finally(() => setLoadingFriends(false));
+      loadFriends(profile.id)
+        .then((items) => setFriendsSlimes(items))
+        .finally(() => setLoadingFriends(false));
     }
     if (screen === 'create') {
-      setCreateOptions((current) => ({ ...current, color: profile.owned_colors[0] ?? STARTER_COLORS[0] }));
+      setCreateOptions((current) => ({
+        ...current,
+        color: profile.owned_colors[0] ?? STARTER_COLORS[0],
+      }));
     }
   }, [loadFriends, loadMySlimes, profile, screen]);
 
@@ -896,17 +906,25 @@ export default function App() {
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session || !isMounted) return;
+
       const usernameGuess = normalizeUsername(
         String(data.session.user.user_metadata?.username ?? data.session.user.email?.split('@')[0] ?? ''),
       );
       if (!usernameGuess) return;
+
       const ensuredProfile = await ensureProfileExists(usernameGuess);
       if (!isMounted) return;
+
       setProfile(ensuredProfile);
       setSlimes(await loadMySlimes(ensuredProfile.id));
       setScreen('home');
-    })().catch((error) => console.error('Initial session load failed:', error));
-    return () => { isMounted = false; };
+    })().catch((error) => {
+      console.error('Initial session load failed:', error);
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, [ensureProfileExists, loadMySlimes]);
 
   useEffect(() => {
@@ -917,14 +935,20 @@ export default function App() {
     };
     const onFocusIn = (event: FocusEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select')) document.body.classList.add('ios-keyboard-open');
+      if (!target) return;
+      if (target.matches('input, textarea, select')) {
+        document.body.classList.add('ios-keyboard-open');
+      }
     };
     const onFocusOut = () => {
       setTimeout(() => {
         const active = document.activeElement as HTMLElement | null;
-        if (!active || !active.matches('input, textarea, select')) document.body.classList.remove('ios-keyboard-open');
+        if (!active || !active.matches('input, textarea, select')) {
+          document.body.classList.remove('ios-keyboard-open');
+        }
       }, 80);
     };
+
     updateVh();
     window.addEventListener('resize', updateVh);
     window.visualViewport?.addEventListener('resize', updateVh);
@@ -948,13 +972,11 @@ export default function App() {
   useEffect(() => {
     return () => {
       leavePlayMode();
-      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
     };
   }, [leavePlayMode]);
-
-  /* ===============================
-     RENDER
-     =============================== */
 
   return (
     <div className="app-shell">
@@ -976,10 +998,9 @@ export default function App() {
         </>
       )}
 
-      {/* ===== AUTH ===== */}
       {screen === 'auth' && (
         <main className="screen auth-screen">
-          <h1 className="title">Slime Maker v3</h1>
+          <h1 className="title">Slime Maker v4</h1>
           <div className="auth-card">
             <h2>Who is playing?</h2>
             <p>Use the same name + 4-digit code on any device.</p>
@@ -993,7 +1014,11 @@ export default function App() {
               autoCorrect="off"
               spellCheck={false}
               enterKeyHint="next"
-              onKeyDown={(event) => { if (event.key === 'Enter') document.getElementById('authCode')?.focus(); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  document.getElementById('authCode')?.focus();
+                }
+              }}
             />
             <input
               id="authCode"
@@ -1004,46 +1029,47 @@ export default function App() {
               maxLength={4}
               inputMode="numeric"
               enterKeyHint="go"
-              onKeyDown={(event) => { if (event.key === 'Enter') void signInOrCreate(); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void signInOrCreate();
+              }}
             />
             <div className="auth-error">{authError}</div>
-            <GameButton variant="primary" size="lg" loading={authBusy} onClick={() => void signInOrCreate()}>
-              Let's Play!
-            </GameButton>
+            <button className="btn btn-primary" type="button" onClick={() => void signInOrCreate()} disabled={authBusy}>
+              {authBusy ? 'Loading...' : "Let's Play!"}
+            </button>
           </div>
         </main>
       )}
 
-      {/* ===== MAIN SCREENS ===== */}
       {screen !== 'auth' && profile && (
         <main className="screen">
-
-          {/* --- HOME --- */}
           {screen === 'home' && (
-            <GlassCard className="center">
+            <section className="panel center">
               <h1 className="title">Slime Maker</h1>
               <MiniSlime color="#55efc4" sparkle="stars" charm="star" />
               <div className="stack">
-                <GameButton variant="primary" size="lg" onClick={() => goScreen('create')}>
+                <button className="btn btn-pink" type="button" onClick={() => goScreen('create')}>
                   Create a Slime
-                </GameButton>
-                <GameButton variant="secondary" size="lg" onClick={() => goScreen('collection')}>
+                </button>
+                <button className="btn btn-purple" type="button" onClick={() => goScreen('collection')}>
                   My Slimes
-                </GameButton>
-                <GameButton variant="blue" size="lg" onClick={() => goScreen('friends')}>
+                </button>
+                <button className="btn btn-blue" type="button" onClick={() => goScreen('friends')}>
                   Friends' Slimes
-                </GameButton>
-                <GameButton variant="orange" size="lg" onClick={() => goScreen('shop')}>
+                </button>
+                <button className="btn btn-orange" type="button" onClick={() => goScreen('shop')}>
                   Shop
-                </GameButton>
+                </button>
               </div>
-            </GlassCard>
+            </section>
           )}
 
-          {/* --- CREATE --- */}
           {screen === 'create' && (
-            <GlassCard header="Create your slime" subtitle="Pick a look for your new friend!">
-              <GameButton variant="ghost" size="sm" onClick={() => goScreen('home')}>Back</GameButton>
+            <section className="panel">
+              <button className="btn btn-back" type="button" onClick={() => goScreen('home')}>
+                Back
+              </button>
+              <h2>Create your slime</h2>
               <div className="preview-wrap">
                 <MiniSlime
                   color={createOptions.color}
@@ -1065,7 +1091,10 @@ export default function App() {
                       style={{ background: colorItem.id }}
                       title={owned ? colorItem.name : `${colorItem.name} (${colorItem.price} coins)`}
                       onClick={() => {
-                        if (!owned) { showToast(`Buy ${colorItem.name} first!`); return; }
+                        if (!owned) {
+                          showToast(`Buy ${colorItem.name} first!`);
+                          return;
+                        }
                         setCreateOptions((current) => ({ ...current, color: colorItem.id }));
                       }}
                     />
@@ -1084,7 +1113,10 @@ export default function App() {
                       className={`chip-btn ${selected ? 'selected' : ''} ${owned ? '' : 'locked'}`}
                       type="button"
                       onClick={() => {
-                        if (!owned) { showToast(`Buy ${sparkle.name} first!`); return; }
+                        if (!owned) {
+                          showToast(`Buy ${sparkle.name} first!`);
+                          return;
+                        }
                         setCreateOptions((current) => ({ ...current, sparkle: sparkle.id }));
                       }}
                     >
@@ -1105,7 +1137,10 @@ export default function App() {
                       className={`chip-btn ${selected ? 'selected' : ''} ${owned ? '' : 'locked'}`}
                       type="button"
                       onClick={() => {
-                        if (!owned) { showToast(`Buy ${charm.name} first!`); return; }
+                        if (!owned) {
+                          showToast(`Buy ${charm.name} first!`);
+                          return;
+                        }
                         setCreateOptions((current) => ({ ...current, charm: charm.id }));
                       }}
                     >
@@ -1122,108 +1157,59 @@ export default function App() {
                 maxLength={20}
                 onChange={(event) => setCreateOptions((current) => ({ ...current, name: event.target.value }))}
               />
-              <GameButton variant="green" size="lg" onClick={() => void handleCreateSlime()}>
+              <button className="btn btn-green" type="button" onClick={() => void handleCreateSlime()}>
                 Make My Slime (+10 coins)
-              </GameButton>
-            </GlassCard>
+              </button>
+            </section>
           )}
 
-          {/* --- COLLECTION --- */}
           {screen === 'collection' && (
-            <GlassCard header="My Slimes" subtitle="Tap a slime to play!">
-              <GameButton variant="ghost" size="sm" onClick={() => goScreen('home')}>Back</GameButton>
+            <section className="panel">
+              <button className="btn btn-back" type="button" onClick={() => goScreen('home')}>
+                Back
+              </button>
+              <h2>My Slimes</h2>
               {loadingCollection && <div className="subtle">Loading...</div>}
               {!loadingCollection && slimes.length === 0 && <div className="subtle">No slimes yet. Create one!</div>}
               <div className="grid">
-                {slimes.map((slime) => {
-                  const sparkleData = findSparkle(slime.sparkle);
-                  const charmData = findCharm(slime.charm);
-                  return (
-                    <div key={slime.id} className="card" onClick={() => openPlay(slime)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') openPlay(slime); }}>
-                      <MiniSlime color={slime.color} sparkle={slime.sparkle} charm={slime.charm} size="small" />
-                      <div className="card-title">{slime.name}</div>
-                      <div className="card-badges">
-                        {sparkleData && sparkleData.id !== 'none' && <span>{sparkleData.emoji}</span>}
-                        {charmData && charmData.id !== 'none' && <span>{charmData.emoji}</span>}
-                      </div>
-                      <div className="card-cta">Tap to play</div>
-                      <GameButton
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => { e.stopPropagation(); void handleCreateShare(slime.id); }}
-                      >
-                        Share
-                      </GameButton>
-                    </div>
-                  );
-                })}
+                {slimes.map((slime) => (
+                  <button key={slime.id} className="card" type="button" onClick={() => openPlay(slime)}>
+                    <MiniSlime color={slime.color} sparkle={slime.sparkle} charm={slime.charm} size="small" />
+                    <div className="card-title">{slime.name}</div>
+                  </button>
+                ))}
               </div>
-            </GlassCard>
+            </section>
           )}
 
-          {/* --- FRIENDS --- */}
           {screen === 'friends' && (
-            <GlassCard header="Friends' Slimes" subtitle="Explore slimes from other players!">
-              <GameButton variant="ghost" size="sm" onClick={() => goScreen('home')}>Back</GameButton>
-
-              {/* Redeem share code */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  className="share-input"
-                  value={redeemState.code}
-                  onChange={(e) => setRedeemState((prev) => ({ ...prev, code: e.target.value, error: null }))}
-                  placeholder="Paste share code"
-                  maxLength={10}
-                  style={{ flex: 1, minWidth: 140 }}
-                />
-                <GameButton
-                  variant="primary"
-                  size="sm"
-                  loading={redeemState.loading}
-                  onClick={() => void handleRedeemCode()}
-                >
-                  Redeem
-                </GameButton>
-              </div>
-              {redeemState.error && <div className="auth-error">{redeemState.error}</div>}
-
-              {/* Redeemed slime preview */}
-              {redeemState.result && (
-                <div className="card" style={{ maxWidth: 280, margin: '0 auto' }}>
-                  <MiniSlime
-                    color={redeemState.result.color}
-                    sparkle={redeemState.result.sparkle}
-                    charm={redeemState.result.charm}
-                    size="small"
-                  />
-                  <div className="card-title">{redeemState.result.name}</div>
-                  <div className="card-subtitle">by {redeemState.result.creator_name}</div>
-                  <GameButton variant="primary" size="sm" onClick={() => handlePlaySharedSlime(redeemState.result!)}>
-                    Play with this slime!
-                  </GameButton>
-                </div>
-              )}
-
+            <section className="panel">
+              <button className="btn btn-back" type="button" onClick={() => goScreen('home')}>
+                Back
+              </button>
+              <h2>Friends' Slimes</h2>
               {loadingFriends && <div className="subtle">Loading...</div>}
-              {!loadingFriends && friendsSlimes.length === 0 && !redeemState.result && (
-                <div className="subtle">No friends yet. Share a code to connect!</div>
+              {!loadingFriends && friendsSlimes.length === 0 && (
+                <div className="subtle">No friends yet. Invite someone to play!</div>
               )}
               <div className="grid">
                 {friendsSlimes.map((slime) => (
-                  <div key={slime.id} className="card" onClick={() => openPlay(slime)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') openPlay(slime); }}>
+                  <button key={slime.id} className="card" type="button" onClick={() => openPlay(slime)}>
                     <MiniSlime color={slime.color} sparkle={slime.sparkle} charm={slime.charm} size="small" />
                     <div className="card-title">{slime.name}</div>
                     <div className="card-subtitle">by {slime.profiles?.username ?? 'friend'}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
-            </GlassCard>
+            </section>
           )}
 
-          {/* --- SHOP --- */}
           {screen === 'shop' && (
-            <GlassCard header="Shop" subtitle={`You have 🪙 ${coinBalance} coins`}>
-              <GameButton variant="ghost" size="sm" onClick={() => goScreen('home')}>Back</GameButton>
+            <section className="panel">
+              <button className="btn btn-back" type="button" onClick={() => goScreen('home')}>
+                Back
+              </button>
+              <h2>Shop</h2>
 
               <ShopSection
                 title="Colors"
@@ -1233,6 +1219,7 @@ export default function App() {
                 onBuy={(id, price) => handleBuyItem(id, 'color', price)}
                 renderPreview={(item) => <div className="shop-color-preview" style={{ background: item.id }} />}
               />
+
               <ShopSection
                 title="Sparkles"
                 items={ALL_SPARKLES.filter((item) => item.price > 0)}
@@ -1241,6 +1228,7 @@ export default function App() {
                 onBuy={(id, price) => handleBuyItem(id, 'sparkle', price)}
                 renderPreview={(item) => <div className="shop-emoji">{(item as SparkleItem).emoji}</div>}
               />
+
               <ShopSection
                 title="Charms"
                 items={ALL_CHARMS.filter((item) => item.price > 0)}
@@ -1249,46 +1237,80 @@ export default function App() {
                 onBuy={(id, price) => handleBuyItem(id, 'charm', price)}
                 renderPreview={(item) => <div className="shop-emoji">{(item as CharmItem).emoji}</div>}
               />
-            </GlassCard>
+            </section>
           )}
 
-          {/* --- PLAY --- */}
           {screen === 'play' && playSlime && (
-            <GlassCard>
-              <GameButton variant="ghost" size="sm" onClick={() => goScreen('home')}>Home</GameButton>
+            <section className="panel">
+              <button className="btn btn-back" type="button" onClick={() => goScreen('home')}>
+                Home
+              </button>
               <p className="play-title">
                 {playSlime.user_id === profile.id
                   ? `Playing with ${playSlime.name}!`
                   : `${playSlime.profiles?.username ?? 'Friend'}'s ${playSlime.name}`}
               </p>
 
-              <TopHUD
-                mood={playHud.mood}
-                energy={playHud.energy}
-                combo={playHud.combo}
-                status={playHud.status}
-              />
+              <div className="play-hud">
+                <div className="play-hud-top">
+                  <span>Mood: {playHud.mood}</span>
+                  <span>Combo x{playHud.combo}</span>
+                </div>
+                <div className="energy-track">
+                  <div
+                    className={`energy-fill ${playHud.energy >= 100 ? 'full' : ''}`}
+                    style={{ width: `${playHud.energy}%` }}
+                  />
+                </div>
+                <div className="play-status">{playHud.status}</div>
+                <div className="quality-controls">
+                  <span className="quality-title">Render Quality</span>
+                  <div className="quality-tabs" role="tablist" aria-label="Render quality mode">
+                    {QUALITY_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="tab"
+                        aria-selected={qualityMode === mode}
+                        className={`quality-tab ${qualityMode === mode ? 'active' : ''}`}
+                        onClick={() => handleQualityModeChange(mode)}
+                      >
+                        {mode === 'auto'
+                          ? 'Auto'
+                          : mode === 'ultra'
+                            ? 'Ultra'
+                            : mode === 'balanced'
+                              ? 'Balanced'
+                              : 'Saver'}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="quality-summary">Current: {qualitySummary}</span>
+                </div>
+              </div>
 
               <div className="play-stage-wrap">
-                <PixiSlimeStage ref={pixiRef} slime={playSlime} onInteract={handlePixiInteract} />
-                {showUltimateText && (
-                  <div className="ultimate-overlay">
-                    <div className="ultimate-text">MEGA SLIME!!</div>
-                  </div>
-                )}
+                <Suspense fallback={<div className="stage-loading">Loading 3D slime...</div>}>
+                  <SlimeStage3D
+                    ref={pixiRef}
+                    slime={playSlime}
+                    onInteract={handlePixiInteract}
+                    quality={resolvedQuality}
+                  />
+                </Suspense>
                 <div className="bubble-layer">
                   {bubbles.map((bubble) => (
                     <button
                       key={bubble.id}
                       type="button"
-                      className={`bubble ${bubble.type === 'golden' ? 'golden' : ''}`}
+                      className="bubble"
                       style={{
                         left: `${bubble.left}%`,
                         width: `${bubble.size}px`,
                         height: `${bubble.size}px`,
                         animationDuration: `${bubble.durationMs}ms`,
                       }}
-                      onClick={() => handleBubblePop(bubble)}
+                      onClick={() => handleBubblePop(bubble.id)}
                       onAnimationEnd={() => handleBubbleExpired(bubble.id)}
                     />
                   ))}
@@ -1296,71 +1318,41 @@ export default function App() {
               </div>
 
               <div className="play-buttons">
-                <GameButton variant="secondary" size="sm" onClick={() => pixiRef.current?.poke()}>
+                <button className="btn btn-purple small" type="button" onClick={() => pixiRef.current?.poke()}>
                   Poke
-                </GameButton>
-                <GameButton variant="primary" size="sm" onClick={() => pixiRef.current?.squish()}>
+                </button>
+                <button className="btn btn-pink small" type="button" onClick={() => pixiRef.current?.squish()}>
                   Squish
-                </GameButton>
-                <GameButton variant="green" size="sm" onClick={() => pixiRef.current?.stretch()}>
+                </button>
+                <button className="btn btn-green small" type="button" onClick={() => pixiRef.current?.stretch()}>
                   Stretch
-                </GameButton>
-                <GameButton variant="blue" size="sm" onClick={() => pixiRef.current?.bounce()}>
+                </button>
+                <button className="btn btn-blue small" type="button" onClick={() => pixiRef.current?.bounce()}>
                   Bounce
-                </GameButton>
+                </button>
               </div>
 
               <div className="play-buttons">
-                <GameButton
-                  variant="gold"
-                  size="md"
-                  disabled={!canMegaMorph}
-                  onClick={handleMegaMorph}
-                >
-                  {canMegaMorph ? '⚡ Mega Morph ⚡' : 'Mega Morph'}
-                </GameButton>
-                <GameButton variant="secondary" size="md" onClick={handleToggleBubbleRush}>
-                  {bubbleRushActive ? 'Stop Rush' : 'Bubble Rush'}
-                </GameButton>
+                <button className="btn btn-gold small" type="button" onClick={handleMegaMorph} disabled={!canMegaMorph}>
+                  Mega Morph
+                </button>
+                <button className="btn btn-purple small" type="button" onClick={handleToggleBubbleRush}>
+                  {bubbleRushActive ? 'Stop Bubble Rush' : 'Bubble Rush'}
+                </button>
               </div>
 
               {playSlime.user_id === profile.id && (
                 <div className="play-buttons">
-                  <GameButton variant="danger" size="sm" onClick={() => void handleDeleteCurrentSlime()}>
+                  <button className="btn btn-danger small" type="button" onClick={() => void handleDeleteCurrentSlime()}>
                     Delete Slime
-                  </GameButton>
+                  </button>
                 </div>
               )}
-            </GlassCard>
+            </section>
           )}
         </main>
       )}
 
-      {/* ===== SHARE MODAL ===== */}
-      {shareModal.visible && (
-        <div className="modal-overlay" onClick={() => setShareModal((prev) => ({ ...prev, visible: false }))}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <h2>Share your slime!</h2>
-            <p style={{ color: 'var(--text-soft)' }}>
-              Give this code to a friend. They can use it on the Friends' Slimes screen.
-            </p>
-            {shareModal.loading && <div className="subtle">Creating share code...</div>}
-            {shareModal.shareCode && (
-              <>
-                <div className="share-code-display">{formatShareCode(shareModal.shareCode)}</div>
-                <GameButton variant="primary" size="md" onClick={() => handleCopyShareCode(shareModal.shareCode!)}>
-                  Copy Code
-                </GameButton>
-              </>
-            )}
-            <GameButton variant="ghost" size="sm" onClick={() => setShareModal((prev) => ({ ...prev, visible: false }))}>
-              Close
-            </GameButton>
-          </div>
-        </div>
-      )}
-
-      {/* ===== TOAST ===== */}
       {toast && (
         <button
           className="toast"
@@ -1376,10 +1368,6 @@ export default function App() {
     </div>
   );
 }
-
-/* ===============================
-   SHOP SECTION
-   =============================== */
 
 function ShopSection({
   title,
@@ -1412,14 +1400,14 @@ function ShopSection({
               ) : (
                 <>
                   <div className="price">🪙 {item.price}</div>
-                  <GameButton
-                    variant={afford ? 'orange' : 'ghost'}
-                    size="sm"
+                  <button
+                    className={`btn small ${afford ? 'btn-orange' : 'btn-back'}`}
+                    type="button"
                     disabled={!afford}
                     onClick={() => onBuy(item.id, item.price)}
                   >
                     {afford ? 'Buy' : 'Need coins'}
-                  </GameButton>
+                  </button>
                 </>
               )}
             </div>
