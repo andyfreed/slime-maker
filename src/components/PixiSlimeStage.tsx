@@ -220,10 +220,8 @@ function GooglyEye({
 
 function HeartEye({
   groupRef,
-  irisColor,
 }: {
   groupRef: React.RefObject<THREE.Group | null>;
-  irisColor: THREE.Color;
 }) {
   const heartShape = useMemo(() => {
     const shape = new THREE.Shape();
@@ -502,10 +500,10 @@ function renderEyePair(
       return (
         <>
           <group position={[-0.3, 0.16, 0.92]}>
-            <HeartEye groupRef={leftGroupRef} irisColor={irisColor} />
+            <HeartEye groupRef={leftGroupRef} />
           </group>
           <group position={[0.3, 0.16, 0.92]}>
-            <HeartEye groupRef={rightGroupRef} irisColor={irisColor} />
+            <HeartEye groupRef={rightGroupRef} />
           </group>
         </>
       );

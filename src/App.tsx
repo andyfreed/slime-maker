@@ -23,7 +23,6 @@ import {
   STARTER_SPARKLES,
   computePlayMood,
   findCharm,
-  findClothing,
   findSparkle,
 } from './gameData';
 import { supabase } from './lib/supabase';
