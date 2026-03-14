@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { PixiSlimeStageHandle, RenderQuality } from './components/PixiSlimeStage';
+import type { PixiSlimeStageHandle } from './components/PixiSlimeStage';
 import {
   ALL_CHARMS,
   ALL_COLORS,
@@ -26,15 +26,10 @@ import type { CharmItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from 
 
 type Screen = 'auth' | 'home' | 'create' | 'collection' | 'friends' | 'shop' | 'play';
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega' | 'bubble';
-type QualityMode = 'auto' | RenderQuality;
-
 const SlimeStage3D = lazy(async () => {
   const module = await import('./components/PixiSlimeStage');
   return { default: module.PixiSlimeStage };
 });
-
-const QUALITY_MODES: QualityMode[] = ['auto', 'ultra', 'balanced', 'battery'];
-const QUALITY_STORAGE_KEY = 'slime-render-quality-v1';
 
 interface CreateOptions {
   color: string;
@@ -86,40 +81,6 @@ const IS_IOS =
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-function isQualityMode(value: string | null): value is QualityMode {
-  return value === 'auto' || value === 'ultra' || value === 'balanced' || value === 'battery';
-}
-
-function qualityLabel(quality: RenderQuality): string {
-  if (quality === 'ultra') return 'Ultra';
-  if (quality === 'balanced') return 'Balanced';
-  return 'Battery Saver';
-}
-
-function detectAutoQuality(): RenderQuality {
-  const cores = navigator.hardwareConcurrency ?? 4;
-  const dpr = window.devicePixelRatio ?? 1;
-  const memory = Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4);
-  const coarse = window.matchMedia('(pointer: coarse)').matches;
-
-  const lowPower = cores <= 4 || memory <= 3;
-  const midPower = cores <= 6 || memory <= 4;
-
-  if (IS_IOS) {
-    if (lowPower || dpr >= 3) return 'battery';
-    if (midPower) return 'balanced';
-    return 'ultra';
-  }
-
-  if (coarse) {
-    if (lowPower || dpr > 2.7) return 'battery';
-    if (midPower) return 'balanced';
-  }
-
-  if (cores >= 8 && memory >= 8) return 'ultra';
-  if (cores <= 4) return 'battery';
-  return 'balanced';
-}
 
 function normalizeUsername(raw: string): string {
   return raw
@@ -296,8 +257,6 @@ export default function App() {
 
   const [playHud, setPlayHud] = useState<PlayHud>(initialPlayHud);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
-  const [autoQuality, setAutoQuality] = useState<RenderQuality>('balanced');
 
   const [loadingCollection, setLoadingCollection] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -329,11 +288,6 @@ export default function App() {
   const canMegaMorph = playHud.energy >= 100;
   const bubbleRushActive = bubbleRushRef.current.active;
   const coinBalance = profile?.coins ?? 0;
-  const resolvedQuality: RenderQuality = qualityMode === 'auto' ? autoQuality : qualityMode;
-  const qualitySummary =
-    qualityMode === 'auto'
-      ? `Auto (${qualityLabel(autoQuality)})`
-      : qualityLabel(resolvedQuality);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -342,19 +296,6 @@ export default function App() {
     }
     toastTimerRef.current = window.setTimeout(() => setToast(null), 2500);
   }, []);
-
-  const handleQualityModeChange = useCallback(
-    (mode: QualityMode) => {
-      setQualityMode(mode);
-      const effective = mode === 'auto' ? autoQuality : mode;
-      const message =
-        mode === 'auto'
-          ? `Render quality: Auto (${qualityLabel(autoQuality)})`
-          : `Render quality: ${qualityLabel(effective)}`;
-      showToast(message);
-    },
-    [autoQuality, showToast],
-  );
 
   const persistProfile = useCallback(async (nextProfile: Profile) => {
     const { error } = await supabase
@@ -847,29 +788,6 @@ export default function App() {
     setAuthError('');
   }, [leavePlayMode]);
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem(QUALITY_STORAGE_KEY);
-    if (isQualityMode(saved)) {
-      setQualityMode(saved);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(QUALITY_STORAGE_KEY, qualityMode);
-  }, [qualityMode]);
-
-  useEffect(() => {
-    const updateAutoQuality = () => {
-      setAutoQuality(detectAutoQuality());
-    };
-    updateAutoQuality();
-    window.addEventListener('resize', updateAutoQuality);
-    window.addEventListener('orientationchange', updateAutoQuality);
-    return () => {
-      window.removeEventListener('resize', updateAutoQuality);
-      window.removeEventListener('orientationchange', updateAutoQuality);
-    };
-  }, []);
 
   useEffect(() => {
     isOwnPlaySlimeRef.current = Boolean(profile && playSlime && playSlime.user_id === profile.id);
@@ -1263,30 +1181,6 @@ export default function App() {
                   />
                 </div>
                 <div className="play-status">{playHud.status}</div>
-                <div className="quality-controls">
-                  <span className="quality-title">Render Quality</span>
-                  <div className="quality-tabs" role="tablist" aria-label="Render quality mode">
-                    {QUALITY_MODES.map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        role="tab"
-                        aria-selected={qualityMode === mode}
-                        className={`quality-tab ${qualityMode === mode ? 'active' : ''}`}
-                        onClick={() => handleQualityModeChange(mode)}
-                      >
-                        {mode === 'auto'
-                          ? 'Auto'
-                          : mode === 'ultra'
-                            ? 'Ultra'
-                            : mode === 'balanced'
-                              ? 'Balanced'
-                              : 'Saver'}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="quality-summary">Current: {qualitySummary}</span>
-                </div>
               </div>
 
               <div className="play-stage-wrap">
@@ -1295,7 +1189,6 @@ export default function App() {
                     ref={pixiRef}
                     slime={playSlime}
                     onInteract={handlePixiInteract}
-                    quality={resolvedQuality}
                   />
                 </Suspense>
                 <div className="bubble-layer">
