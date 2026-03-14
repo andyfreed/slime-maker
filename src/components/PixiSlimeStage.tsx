@@ -756,16 +756,16 @@ const SlimeScene = ({
     }
 
     if (leftIrisRef.current) {
-      leftIrisRef.current.position.set(eyeLookX * 0.7, eyeLookY * 0.7, 0.045);
+      leftIrisRef.current.position.set(eyeLookX * 0.65, eyeLookY * 0.65, 0.08);
     }
     if (rightIrisRef.current) {
-      rightIrisRef.current.position.set(eyeLookX * 0.7, eyeLookY * 0.7, 0.045);
+      rightIrisRef.current.position.set(eyeLookX * 0.65, eyeLookY * 0.65, 0.08);
     }
     if (leftPupilRef.current) {
-      leftPupilRef.current.position.set(eyeLookX, eyeLookY, 0.07);
+      leftPupilRef.current.position.set(eyeLookX * 0.85, eyeLookY * 0.85, 0.09);
     }
     if (rightPupilRef.current) {
-      rightPupilRef.current.position.set(eyeLookX, eyeLookY, 0.07);
+      rightPupilRef.current.position.set(eyeLookX * 0.85, eyeLookY * 0.85, 0.09);
     }
 
     if (mouthRef.current) {
@@ -984,7 +984,7 @@ const SlimeScene = ({
 
         {/* Left Eye */}
         <group ref={leftEyeGroupRef} position={[-0.33, 0.16, 0.88]}>
-          {/* Sclera with subtle shading */}
+          {/* Sclera */}
           <mesh>
             <sphereGeometry args={[0.15, 32, 32]} />
             <meshPhysicalMaterial
@@ -998,37 +998,57 @@ const SlimeScene = ({
               sheenColor={new THREE.Color('#ffe0e0')}
             />
           </mesh>
-          {/* Slight shadow on top of sclera (eyelid effect) */}
+          {/* Eyelid shadow */}
           <mesh position={[0, 0.04, 0.06]} rotation={[0.3, 0, 0]}>
             <sphereGeometry args={[0.1, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.35]} />
-            <meshBasicMaterial color="#00000015" transparent opacity={0.08} depthWrite={false} />
+            <meshBasicMaterial color="#000000" transparent opacity={0.08} depthWrite={false} />
           </mesh>
-          {/* Iris */}
-          <mesh ref={leftIrisRef} position={[0, 0, 0.045]}>
-            <circleGeometry args={[0.085, 32]} />
+          {/* Iris - 3D hemisphere bulging out of sclera */}
+          <mesh ref={leftIrisRef} position={[0, 0, 0.08]}>
+            <sphereGeometry args={[0.088, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
             <meshPhysicalMaterial
               color={irisColor}
-              roughness={0.15}
-              metalness={0.05}
-              clearcoat={0.7}
+              roughness={0.12}
+              metalness={0.08}
+              clearcoat={0.8}
+              clearcoatRoughness={0.08}
               emissive={irisColor}
-              emissiveIntensity={0.15}
+              emissiveIntensity={0.12}
             />
           </mesh>
-          {/* Pupil */}
-          <mesh ref={leftPupilRef} position={[0, 0, 0.07]}>
-            <circleGeometry args={[0.045, 24]} />
-            <meshStandardMaterial color="#0a0a0a" roughness={0.3} />
+          {/* Iris detail ring (darker outer edge) */}
+          <mesh ref={leftPupilRef} position={[0, 0, 0.09]}>
+            <group>
+              {/* Pupil - 3D sphere sitting on top of iris */}
+              <mesh position={[0, 0, 0.02]}>
+                <sphereGeometry args={[0.052, 24, 24]} />
+                <meshStandardMaterial color="#050505" roughness={0.2} metalness={0.05} />
+              </mesh>
+            </group>
           </mesh>
-          {/* Specular highlight (top-left) */}
-          <mesh position={[-0.03, 0.04, 0.12]}>
-            <circleGeometry args={[0.025, 16]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
+          {/* Cornea - transparent glossy dome over the whole eye */}
+          <mesh position={[0, 0, 0.02]}>
+            <sphereGeometry args={[0.14, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
+            <meshPhysicalMaterial
+              color="#ffffff"
+              transparent
+              opacity={0.06}
+              roughness={0}
+              metalness={0}
+              clearcoat={1}
+              clearcoatRoughness={0}
+              depthWrite={false}
+            />
           </mesh>
-          {/* Secondary highlight (bottom-right, smaller) */}
-          <mesh position={[0.02, -0.02, 0.11]}>
-            <circleGeometry args={[0.012, 12]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.55} depthWrite={false} />
+          {/* Primary specular highlight */}
+          <mesh position={[-0.035, 0.045, 0.14]}>
+            <sphereGeometry args={[0.022, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.95} depthWrite={false} />
+          </mesh>
+          {/* Secondary specular highlight */}
+          <mesh position={[0.025, -0.02, 0.13]}>
+            <sphereGeometry args={[0.011, 12, 12]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.6} depthWrite={false} />
           </mesh>
         </group>
 
@@ -1051,34 +1071,53 @@ const SlimeScene = ({
           {/* Eyelid shadow */}
           <mesh position={[0, 0.04, 0.06]} rotation={[0.3, 0, 0]}>
             <sphereGeometry args={[0.1, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.35]} />
-            <meshBasicMaterial color="#00000015" transparent opacity={0.08} depthWrite={false} />
+            <meshBasicMaterial color="#000000" transparent opacity={0.08} depthWrite={false} />
           </mesh>
-          {/* Iris */}
-          <mesh ref={rightIrisRef} position={[0, 0, 0.045]}>
-            <circleGeometry args={[0.085, 32]} />
+          {/* Iris - 3D hemisphere */}
+          <mesh ref={rightIrisRef} position={[0, 0, 0.08]}>
+            <sphereGeometry args={[0.088, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
             <meshPhysicalMaterial
               color={irisColor}
-              roughness={0.15}
-              metalness={0.05}
-              clearcoat={0.7}
+              roughness={0.12}
+              metalness={0.08}
+              clearcoat={0.8}
+              clearcoatRoughness={0.08}
               emissive={irisColor}
-              emissiveIntensity={0.15}
+              emissiveIntensity={0.12}
             />
           </mesh>
-          {/* Pupil */}
-          <mesh ref={rightPupilRef} position={[0, 0, 0.07]}>
-            <circleGeometry args={[0.045, 24]} />
-            <meshStandardMaterial color="#0a0a0a" roughness={0.3} />
+          {/* Pupil - 3D sphere */}
+          <mesh ref={rightPupilRef} position={[0, 0, 0.09]}>
+            <group>
+              <mesh position={[0, 0, 0.02]}>
+                <sphereGeometry args={[0.052, 24, 24]} />
+                <meshStandardMaterial color="#050505" roughness={0.2} metalness={0.05} />
+              </mesh>
+            </group>
           </mesh>
-          {/* Specular highlight */}
-          <mesh position={[-0.03, 0.04, 0.12]}>
-            <circleGeometry args={[0.025, 16]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
+          {/* Cornea */}
+          <mesh position={[0, 0, 0.02]}>
+            <sphereGeometry args={[0.14, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
+            <meshPhysicalMaterial
+              color="#ffffff"
+              transparent
+              opacity={0.06}
+              roughness={0}
+              metalness={0}
+              clearcoat={1}
+              clearcoatRoughness={0}
+              depthWrite={false}
+            />
           </mesh>
-          {/* Secondary highlight */}
-          <mesh position={[0.02, -0.02, 0.11]}>
-            <circleGeometry args={[0.012, 12]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.55} depthWrite={false} />
+          {/* Primary specular highlight */}
+          <mesh position={[-0.035, 0.045, 0.14]}>
+            <sphereGeometry args={[0.022, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.95} depthWrite={false} />
+          </mesh>
+          {/* Secondary specular highlight */}
+          <mesh position={[0.025, -0.02, 0.13]}>
+            <sphereGeometry args={[0.011, 12, 12]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.6} depthWrite={false} />
           </mesh>
         </group>
 
