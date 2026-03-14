@@ -887,6 +887,59 @@ h3 {
   font-size: 0.9rem;
 }
 
+.play-customizer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.customizer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customizer-label {
+  font-weight: 800;
+  font-size: 0.85rem;
+  min-width: 48px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.customizer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chip-mini {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.chip-mini:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.chip-mini.selected {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.28);
+  transform: scale(1.1);
+}
+
 .toast {
   position: fixed;
   left: 50%;

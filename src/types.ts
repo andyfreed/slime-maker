@@ -40,6 +40,33 @@ export interface CharmItem {
   emoji: string;
 }
 
-export type ShopType = 'color' | 'sparkle' | 'charm';
+export interface EyeStyleItem {
+  id: string;
+  name: string;
+  price: number;
+  emoji: string;
+}
+
+export interface ClothingItem {
+  id: string;
+  name: string;
+  price: number;
+  emoji: string;
+  slot: 'hat' | 'face' | 'neck' | 'body';
+}
+
+export type EyeStyleId =
+  | 'normal'
+  | 'googly'
+  | 'cyclops'
+  | 'alien'
+  | 'heart'
+  | 'sleepy'
+  | 'angry'
+  | 'xeyes'
+  | 'star'
+  | 'dizzy';
+
+export type ShopType = 'color' | 'sparkle' | 'charm' | 'eye' | 'clothing';
 
 export type PlayMood = 'Chill' | 'Happy' | 'Playful' | 'Hyper' | 'Legendary';

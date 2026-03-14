@@ -12,17 +12,75 @@ import {
 import type { PixiSlimeStageHandle } from './components/PixiSlimeStage';
 import {
   ALL_CHARMS,
+  ALL_CLOTHING,
   ALL_COLORS,
+  ALL_EYES,
   ALL_SPARKLES,
   STARTER_CHARMS,
+  STARTER_CLOTHING,
   STARTER_COLORS,
+  STARTER_EYES,
   STARTER_SPARKLES,
   computePlayMood,
   findCharm,
+  findClothing,
   findSparkle,
 } from './gameData';
 import { supabase } from './lib/supabase';
-import type { CharmItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from './types';
+import type { CharmItem, ClothingItem, EyeStyleId, EyeStyleItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from './types';
+
+const EYES_STORAGE_PREFIX = 'slime-eyes-v1-';
+const CLOTHING_STORAGE_PREFIX = 'slime-clothing-v1-';
+const OWNED_EYES_KEY = 'slime-owned-eyes-v1';
+const OWNED_CLOTHING_KEY = 'slime-owned-clothing-v1';
+
+function getOwnedEyes(): string[] {
+  try {
+    const raw = window.localStorage.getItem(OWNED_EYES_KEY);
+    if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; }
+  } catch { /* ignore */ }
+  return [...STARTER_EYES];
+}
+
+function setOwnedEyes(owned: string[]): void {
+  window.localStorage.setItem(OWNED_EYES_KEY, JSON.stringify(owned));
+}
+
+function getOwnedClothing(): string[] {
+  try {
+    const raw = window.localStorage.getItem(OWNED_CLOTHING_KEY);
+    if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; }
+  } catch { /* ignore */ }
+  return [...STARTER_CLOTHING];
+}
+
+function setOwnedClothing(owned: string[]): void {
+  window.localStorage.setItem(OWNED_CLOTHING_KEY, JSON.stringify(owned));
+}
+
+function getSlimeEyeStyle(slimeId: string): EyeStyleId {
+  try {
+    const raw = window.localStorage.getItem(EYES_STORAGE_PREFIX + slimeId);
+    if (raw) return raw as EyeStyleId;
+  } catch { /* ignore */ }
+  return 'normal';
+}
+
+function setSlimeEyeStyle(slimeId: string, style: EyeStyleId): void {
+  window.localStorage.setItem(EYES_STORAGE_PREFIX + slimeId, style);
+}
+
+function getSlimeClothing(slimeId: string): string {
+  try {
+    const raw = window.localStorage.getItem(CLOTHING_STORAGE_PREFIX + slimeId);
+    if (raw) return raw;
+  } catch { /* ignore */ }
+  return 'none';
+}
+
+function setSlimeClothing(slimeId: string, clothingId: string): void {
+  window.localStorage.setItem(CLOTHING_STORAGE_PREFIX + slimeId, clothingId);
+}
 
 type Screen = 'auth' | 'home' | 'create' | 'collection' | 'friends' | 'shop' | 'play';
 type InteractionKind = 'drag' | 'poke' | 'squish' | 'stretch' | 'bounce' | 'mega' | 'bubble';
@@ -35,6 +93,8 @@ interface CreateOptions {
   color: string;
   sparkle: string;
   charm: string;
+  eyeStyle: EyeStyleId;
+  clothing: string;
   name: string;
 }
 
@@ -252,11 +312,17 @@ export default function App() {
     color: STARTER_COLORS[0],
     sparkle: 'none',
     charm: 'none',
+    eyeStyle: 'normal',
+    clothing: 'none',
     name: '',
   });
 
   const [playHud, setPlayHud] = useState<PlayHud>(initialPlayHud);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [playEyeStyle, setPlayEyeStyle] = useState<EyeStyleId>('normal');
+  const [playClothing, setPlayClothing] = useState<string>('none');
+  const [ownedEyes, setOwnedEyesState] = useState<string[]>(getOwnedEyes);
+  const [ownedClothingList, setOwnedClothingState] = useState<string[]>(getOwnedClothing);
 
   const [loadingCollection, setLoadingCollection] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -284,6 +350,8 @@ export default function App() {
     () => new Set(profile?.owned_charms ?? []),
     [profile?.owned_charms],
   );
+  const ownedEyeSet = useMemo(() => new Set(ownedEyes), [ownedEyes]);
+  const ownedClothingSet = useMemo(() => new Set(ownedClothingList), [ownedClothingList]);
 
   const canMegaMorph = playHud.energy >= 100;
   const bubbleRushActive = bubbleRushRef.current.active;
@@ -552,6 +620,8 @@ export default function App() {
   const openPlay = useCallback(
     (slime: Slime) => {
       setPlaySlime(slime);
+      setPlayEyeStyle(getSlimeEyeStyle(slime.id));
+      setPlayClothing(getSlimeClothing(slime.id));
       setScreen('play');
       resetPlaySession();
     },
@@ -647,6 +717,8 @@ export default function App() {
     }
 
     const created = data as Slime;
+    setSlimeEyeStyle(created.id, createOptions.eyeStyle);
+    setSlimeClothing(created.id, createOptions.clothing);
     setSlimes((current) => [created, ...current]);
     updateProfile((current) => ({ ...current, coins: current.coins + 10 }));
     showToast('New slime made! +10 coins');
@@ -673,41 +745,44 @@ export default function App() {
   const handleBuyItem = useCallback(
     (id: string, type: ShopType, price: number) => {
       if (!profile) return;
-      const owned =
-        type === 'color'
-          ? profile.owned_colors.includes(id)
-          : type === 'sparkle'
-            ? profile.owned_sparkles.includes(id)
-            : profile.owned_charms.includes(id);
 
-      if (owned) {
-        showToast('You already own that!');
-        return;
+      let owned = false;
+      if (type === 'color') owned = profile.owned_colors.includes(id);
+      else if (type === 'sparkle') owned = profile.owned_sparkles.includes(id);
+      else if (type === 'charm') owned = profile.owned_charms.includes(id);
+      else if (type === 'eye') owned = ownedEyes.includes(id);
+      else if (type === 'clothing') owned = ownedClothingList.includes(id);
+
+      if (owned) { showToast('You already own that!'); return; }
+      if (profile.coins < price) { showToast('Need more coins!'); return; }
+
+      if (type === 'eye') {
+        const next = [...new Set([...ownedEyes, id])];
+        setOwnedEyesState(next);
+        setOwnedEyes(next);
+        updateProfile((current) => ({ ...current, coins: current.coins - price }));
+      } else if (type === 'clothing') {
+        const next = [...new Set([...ownedClothingList, id])];
+        setOwnedClothingState(next);
+        setOwnedClothing(next);
+        updateProfile((current) => ({ ...current, coins: current.coins - price }));
+      } else {
+        updateProfile((current) => {
+          const next: Profile = {
+            ...current, coins: current.coins - price,
+            owned_colors: current.owned_colors, owned_sparkles: current.owned_sparkles, owned_charms: current.owned_charms,
+          };
+          if (type === 'color') next.owned_colors = [...new Set([...current.owned_colors, id])];
+          if (type === 'sparkle') next.owned_sparkles = [...new Set([...current.owned_sparkles, id])];
+          if (type === 'charm') next.owned_charms = [...new Set([...current.owned_charms, id])];
+          return next;
+        });
       }
 
-      if (profile.coins < price) {
-        showToast('Need more coins!');
-        return;
-      }
-
-      updateProfile((current) => {
-        const next: Profile = {
-          ...current,
-          coins: current.coins - price,
-          owned_colors: current.owned_colors,
-          owned_sparkles: current.owned_sparkles,
-          owned_charms: current.owned_charms,
-        };
-        if (type === 'color') next.owned_colors = [...new Set([...current.owned_colors, id])];
-        if (type === 'sparkle') next.owned_sparkles = [...new Set([...current.owned_sparkles, id])];
-        if (type === 'charm') next.owned_charms = [...new Set([...current.owned_charms, id])];
-        return next;
-      });
-
-      const item = [...ALL_COLORS, ...ALL_SPARKLES, ...ALL_CHARMS].find((entry) => entry.id === id);
+      const item = [...ALL_COLORS, ...ALL_SPARKLES, ...ALL_CHARMS, ...ALL_EYES, ...ALL_CLOTHING].find((entry) => entry.id === id);
       showToast(`Bought ${item?.name ?? 'item'}!`);
     },
-    [profile, showToast, updateProfile],
+    [ownedClothingList, ownedEyes, profile, showToast, updateProfile],
   );
 
   const signInOrCreate = useCallback(async () => {
@@ -1068,6 +1143,48 @@ export default function App() {
                 })}
               </div>
 
+              <h3 className="section-label">Eye Style</h3>
+              <div className="chips">
+                {ALL_EYES.map((eye) => {
+                  const owned = ownedEyeSet.has(eye.id);
+                  const selected = createOptions.eyeStyle === eye.id;
+                  return (
+                    <button
+                      key={eye.id}
+                      className={`chip-btn ${selected ? 'selected' : ''} ${owned ? '' : 'locked'}`}
+                      type="button"
+                      onClick={() => {
+                        if (!owned) { showToast(`Buy ${eye.name} first!`); return; }
+                        setCreateOptions((current) => ({ ...current, eyeStyle: eye.id as EyeStyleId }));
+                      }}
+                    >
+                      {eye.emoji} {eye.name}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3 className="section-label">Clothing</h3>
+              <div className="chips">
+                {ALL_CLOTHING.map((cloth) => {
+                  const owned = ownedClothingSet.has(cloth.id);
+                  const selected = createOptions.clothing === cloth.id;
+                  return (
+                    <button
+                      key={cloth.id}
+                      className={`chip-btn ${selected ? 'selected' : ''} ${owned ? '' : 'locked'}`}
+                      type="button"
+                      onClick={() => {
+                        if (!owned) { showToast(`Buy ${cloth.name} first!`); return; }
+                        setCreateOptions((current) => ({ ...current, clothing: cloth.id }));
+                      }}
+                    >
+                      {cloth.emoji ? `${cloth.emoji} ${cloth.name}` : cloth.name}
+                    </button>
+                  );
+                })}
+              </div>
+
               <input
                 className="name-input"
                 value={createOptions.name}
@@ -1155,6 +1272,24 @@ export default function App() {
                 onBuy={(id, price) => handleBuyItem(id, 'charm', price)}
                 renderPreview={(item) => <div className="shop-emoji">{(item as CharmItem).emoji}</div>}
               />
+
+              <ShopSection
+                title="Eye Styles"
+                items={ALL_EYES.filter((item) => item.price > 0)}
+                isOwned={(id) => ownedEyeSet.has(id)}
+                canAfford={(price) => coinBalance >= price}
+                onBuy={(id, price) => handleBuyItem(id, 'eye', price)}
+                renderPreview={(item) => <div className="shop-emoji">{(item as EyeStyleItem).emoji}</div>}
+              />
+
+              <ShopSection
+                title="Clothing"
+                items={ALL_CLOTHING.filter((item) => item.price > 0)}
+                isOwned={(id) => ownedClothingSet.has(id)}
+                canAfford={(price) => coinBalance >= price}
+                onBuy={(id, price) => handleBuyItem(id, 'clothing', price)}
+                renderPreview={(item) => <div className="shop-emoji">{(item as ClothingItem).emoji}</div>}
+              />
             </section>
           )}
 
@@ -1188,6 +1323,8 @@ export default function App() {
                   <SlimeStage3D
                     ref={pixiRef}
                     slime={playSlime}
+                    eyeStyle={playEyeStyle}
+                    clothing={playClothing}
                     onInteract={handlePixiInteract}
                   />
                 </Suspense>
@@ -1223,6 +1360,45 @@ export default function App() {
                 <button className="btn btn-blue small" type="button" onClick={() => pixiRef.current?.bounce()}>
                   Bounce
                 </button>
+              </div>
+
+              <div className="play-customizer">
+                <div className="customizer-row">
+                  <span className="customizer-label">Eyes:</span>
+                  <div className="customizer-chips">
+                    {ALL_EYES.filter((e) => ownedEyeSet.has(e.id)).map((eye) => (
+                      <button
+                        key={eye.id}
+                        type="button"
+                        className={`chip-mini ${playEyeStyle === eye.id ? 'selected' : ''}`}
+                        onClick={() => {
+                          setPlayEyeStyle(eye.id as EyeStyleId);
+                          if (playSlime) setSlimeEyeStyle(playSlime.id, eye.id as EyeStyleId);
+                        }}
+                      >
+                        {eye.emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="customizer-row">
+                  <span className="customizer-label">Outfit:</span>
+                  <div className="customizer-chips">
+                    {ALL_CLOTHING.filter((c) => ownedClothingSet.has(c.id)).map((cloth) => (
+                      <button
+                        key={cloth.id}
+                        type="button"
+                        className={`chip-mini ${playClothing === cloth.id ? 'selected' : ''}`}
+                        onClick={() => {
+                          setPlayClothing(cloth.id);
+                          if (playSlime) setSlimeClothing(playSlime.id, cloth.id);
+                        }}
+                      >
+                        {cloth.emoji || '✖'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="play-buttons">

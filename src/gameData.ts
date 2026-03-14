@@ -1,8 +1,10 @@
-import type { CharmItem, ColorItem, PlayMood, SparkleItem } from './types';
+import type { CharmItem, ClothingItem, ColorItem, EyeStyleItem, PlayMood, SparkleItem } from './types';
 
 export const STARTER_COLORS = ['#55efc4', '#74b9ff', '#a29bfe', '#fd79a8', '#ffeaa7'];
 export const STARTER_SPARKLES = ['none'];
 export const STARTER_CHARMS = ['none'];
+export const STARTER_EYES = ['normal'];
+export const STARTER_CLOTHING = ['none'];
 
 export const ALL_COLORS: ColorItem[] = [
   { id: '#55efc4', name: 'Mint', price: 0 },
@@ -42,12 +44,47 @@ export const ALL_CHARMS: CharmItem[] = [
   { id: 'unicorn', name: 'Unicorn', price: 40, emoji: '🦄' },
 ];
 
+export const ALL_EYES: EyeStyleItem[] = [
+  { id: 'normal', name: 'Normal', price: 0, emoji: '👀' },
+  { id: 'googly', name: 'Googly', price: 15, emoji: '🤪' },
+  { id: 'cyclops', name: 'Cyclops', price: 20, emoji: '🔮' },
+  { id: 'alien', name: 'Alien', price: 25, emoji: '👽' },
+  { id: 'heart', name: 'Heart Eyes', price: 20, emoji: '😍' },
+  { id: 'sleepy', name: 'Sleepy', price: 15, emoji: '😴' },
+  { id: 'angry', name: 'Angry', price: 20, emoji: '😠' },
+  { id: 'xeyes', name: 'X Eyes', price: 25, emoji: '😵' },
+  { id: 'star', name: 'Star Eyes', price: 30, emoji: '🤩' },
+  { id: 'dizzy', name: 'Dizzy', price: 20, emoji: '😵‍💫' },
+];
+
+export const ALL_CLOTHING: ClothingItem[] = [
+  { id: 'none', name: 'None', price: 0, emoji: '', slot: 'hat' },
+  { id: 'tophat', name: 'Top Hat', price: 25, emoji: '🎩', slot: 'hat' },
+  { id: 'cowboy', name: 'Cowboy Hat', price: 30, emoji: '🤠', slot: 'hat' },
+  { id: 'partyhat', name: 'Party Hat', price: 20, emoji: '🥳', slot: 'hat' },
+  { id: 'beanie', name: 'Beanie', price: 15, emoji: '🧶', slot: 'hat' },
+  { id: 'sunglasses', name: 'Sunglasses', price: 20, emoji: '😎', slot: 'face' },
+  { id: 'monocle', name: 'Monocle', price: 30, emoji: '🧐', slot: 'face' },
+  { id: 'bowtie', name: 'Bow Tie', price: 15, emoji: '🎀', slot: 'neck' },
+  { id: 'scarf', name: 'Scarf', price: 20, emoji: '🧣', slot: 'neck' },
+  { id: 'cape', name: 'Cape', price: 35, emoji: '🦸', slot: 'body' },
+  { id: 'tutu', name: 'Tutu', price: 25, emoji: '🩰', slot: 'body' },
+];
+
 export function findSparkle(id: string): SparkleItem | undefined {
   return ALL_SPARKLES.find((item) => item.id === id);
 }
 
 export function findCharm(id: string): CharmItem | undefined {
   return ALL_CHARMS.find((item) => item.id === id);
+}
+
+export function findEyeStyle(id: string): EyeStyleItem | undefined {
+  return ALL_EYES.find((item) => item.id === id);
+}
+
+export function findClothing(id: string): ClothingItem | undefined {
+  return ALL_CLOTHING.find((item) => item.id === id);
 }
 
 export function computePlayMood(energy: number): PlayMood {
