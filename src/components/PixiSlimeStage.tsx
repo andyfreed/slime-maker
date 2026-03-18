@@ -102,6 +102,9 @@ const ULTRA_PRESET = {
   transmissionSamples: 6,
 };
 
+// Gaussian falloff for localized stretch: 1/(2*r²) where r≈0.65
+const PULL_FALLOFF = 1 / (2 * 0.65 * 0.65);
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -670,6 +673,12 @@ const SlimeScene = ({
   const googlyPosRef = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
   const pinchRef = useRef<PinchState>({ active: false, startDist: 0, currentDist: 0, centerX: 0, centerY: 0 });
 
+  // Localized stretch state
+  const dragHitLocalRef = useRef<THREE.Vector3 | null>(null);
+  const dragStartPointerRef = useRef(new THREE.Vector2(0, 0));
+  const dragPullRef = useRef(new THREE.Vector3(0, 0, 0));
+  const dragVelocityRef = useRef(new THREE.Vector3(0, 0, 0));
+
   const megaStateRef = useRef<MegaMorphState>({
     active: false,
     phase: 'none',
@@ -988,14 +997,46 @@ const SlimeScene = ({
     const t = state.clock.elapsedTime;
 
     if (isDraggingRef.current && !pinchRef.current.active) {
-      targetPosRef.current.set(pointer.x * 1.6, pointer.y * 1.1 - 0.02, 0);
+      // Subtle body lean — localized stretch is now the primary effect
+      targetPosRef.current.set(pointer.x * 0.35, pointer.y * 0.25 - 0.02, 0);
       const dist = Math.min(1, Math.hypot(pointer.x, pointer.y));
-      const stretch = 1 + dist * 0.55;
-      const squish = 1 - dist * 0.38;
-      if (Math.abs(pointer.x) > Math.abs(pointer.y)) {
-        targetScaleRef.current.set(stretch, squish, 1);
-      } else {
-        targetScaleRef.current.set(squish, stretch, 1);
+      targetScaleRef.current.set(1 + dist * 0.08, 1 - dist * 0.06, 1);
+
+      // Update localized pull toward pointer delta
+      if (dragHitLocalRef.current) {
+        const dx = (pointer.x - dragStartPointerRef.current.x) * 1.8;
+        const dy = (pointer.y - dragStartPointerRef.current.y) * 1.5;
+        const pullMag = Math.sqrt(dx * dx + dy * dy);
+        const prevX = dragPullRef.current.x;
+        const prevY = dragPullRef.current.y;
+        const prevZ = dragPullRef.current.z;
+        dragPullRef.current.x += (dx - dragPullRef.current.x) * 0.15 * d;
+        dragPullRef.current.y += (dy - dragPullRef.current.y) * 0.15 * d;
+        dragPullRef.current.z += (pullMag * 0.3 - dragPullRef.current.z) * 0.15 * d;
+        const len = dragPullRef.current.length();
+        if (len > 1.5) dragPullRef.current.multiplyScalar(1.5 / len);
+        if (delta > 0.001) {
+          dragVelocityRef.current.set(
+            (dragPullRef.current.x - prevX) / delta,
+            (dragPullRef.current.y - prevY) / delta,
+            (dragPullRef.current.z - prevZ) / delta,
+          );
+        }
+      }
+    }
+
+    // Spring-back for localized stretch after release
+    if (!isDraggingRef.current && dragHitLocalRef.current) {
+      const pull = dragPullRef.current;
+      const vel = dragVelocityRef.current;
+      vel.x += (-16 * pull.x - 4 * vel.x) * delta;
+      vel.y += (-16 * pull.y - 4 * vel.y) * delta;
+      vel.z += (-16 * pull.z - 4 * vel.z) * delta;
+      pull.x += vel.x * delta;
+      pull.y += vel.y * delta;
+      pull.z += vel.z * delta;
+      if (pull.lengthSq() < 0.0001 && vel.lengthSq() < 0.01) {
+        pull.set(0, 0, 0); vel.set(0, 0, 0); dragHitLocalRef.current = null;
       }
     }
 
@@ -1126,6 +1167,18 @@ const SlimeScene = ({
         arr[i] = bx * radiusScale;
         arr[i + 1] = by * (1 + waveA * 0.85 + waveB * 0.5 + waveC * 0.3);
         arr[i + 2] = bz * (1 + waveA * 0.9 + waveB * 0.65 + waveC * 0.35);
+
+        // Localized stretch deformation
+        if (dragHitLocalRef.current && dragPullRef.current.lengthSq() > 0.0001) {
+          const dvx = bx - dragHitLocalRef.current.x;
+          const dvy = by - dragHitLocalRef.current.y;
+          const dvz = bz - dragHitLocalRef.current.z;
+          const distSq = dvx * dvx + dvy * dvy + dvz * dvz;
+          const influence = Math.exp(-distSq * PULL_FALLOFF);
+          arr[i] += dragPullRef.current.x * influence;
+          arr[i + 1] += dragPullRef.current.y * influence;
+          arr[i + 2] += dragPullRef.current.z * influence;
+        }
       }
       positionAttr.needsUpdate = true;
       geometry.computeVertexNormals();
@@ -1279,6 +1332,17 @@ const SlimeScene = ({
         onPointerDown={(event) => {
           event.stopPropagation();
           isDraggingRef.current = true;
+
+          // Capture local-space hit point for localized stretching
+          if (rootRef.current && event.point) {
+            const localPoint = event.point.clone();
+            rootRef.current.worldToLocal(localPoint);
+            dragHitLocalRef.current = localPoint;
+            dragStartPointerRef.current.set(pointer.x, pointer.y);
+            dragPullRef.current.set(0, 0, 0);
+            dragVelocityRef.current.set(0, 0, 0);
+          }
+
           spawnBurst(4);
           onInteract?.('drag');
         }}
