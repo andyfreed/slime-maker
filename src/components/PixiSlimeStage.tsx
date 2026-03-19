@@ -581,7 +581,16 @@ function renderEyePair(
 
 // ---- Clothing rendering ----
 
-function ClothingRenderer({ clothingId }: { clothingId: string }) {
+// Base positions for each clothing slot — z pushed in front of sphere surface
+const CLOTHING_BASE: Record<string, [number, number, number]> = {
+  hat:  [0,  0.95, 0.45],
+  face: [0,  0.12, 1.10],
+  neck: [0, -0.42, 1.02],
+  body: [0, -0.15, 1.10],
+};
+const CLOTHING_SCALE: Record<string, number> = { hat: 0.7, face: 0.6, neck: 0.55, body: 0.8 };
+
+function ClothingRenderer({ clothingId, groupRef }: { clothingId: string; groupRef: React.RefObject<THREE.Group | null> }) {
   const item = findClothing(clothingId);
   if (!item || item.id === 'none') return null;
 
@@ -591,34 +600,15 @@ function ClothingRenderer({ clothingId }: { clothingId: string }) {
     return () => { texture.dispose(); };
   }, [texture]);
 
-  switch (item.slot) {
-    case 'hat':
-      return (
-        <sprite position={[0, 0.95, 0.15]} scale={[0.7, 0.7, 0.7]}>
-          <spriteMaterial map={texture} transparent depthWrite={false} />
-        </sprite>
-      );
-    case 'face':
-      return (
-        <sprite position={[0, 0.12, 1.02]} scale={[0.6, 0.6, 0.6]}>
-          <spriteMaterial map={texture} transparent depthWrite={false} />
-        </sprite>
-      );
-    case 'neck':
-      return (
-        <sprite position={[0, -0.42, 0.85]} scale={[0.55, 0.55, 0.55]}>
-          <spriteMaterial map={texture} transparent depthWrite={false} />
-        </sprite>
-      );
-    case 'body':
-      return (
-        <sprite position={[0, -0.15, 0.95]} scale={[0.8, 0.8, 0.8]}>
-          <spriteMaterial map={texture} transparent depthWrite={false} />
-        </sprite>
-      );
-    default:
-      return null;
-  }
+  const s = CLOTHING_SCALE[item.slot] ?? 0.6;
+
+  return (
+    <group ref={groupRef}>
+      <sprite scale={[s, s, s]} renderOrder={10}>
+        <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
+      </sprite>
+    </group>
+  );
 }
 
 // ---- Main scene ----
@@ -669,6 +659,10 @@ const SlimeScene = ({
   const blinkTimerRef = useRef(0);
   const lastPokeForceRef = useRef(0);
   const bodyVisibleRef = useRef(true);
+  const clothingGroupRef = useRef<THREE.Group>(null);
+  const clothingBaseRef = useRef(new THREE.Vector3(0, 0, 1));
+  const charmGroupRef = useRef<THREE.Group>(null);
+  const charmBaseRef = useRef(new THREE.Vector3(0.63, 0.63, 0.55));
   const googlyVelocityRef = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
   const googlyPosRef = useRef({ lx: 0, ly: 0, rx: 0, ry: 0 });
   const pinchRef = useRef<PinchState>({ active: false, startDist: 0, currentDist: 0, centerX: 0, centerY: 0 });
@@ -742,6 +736,20 @@ const SlimeScene = ({
   const charmTexture = useMemo(() => {
     if (!charm || charm.id === 'none') return null;
     return createEmojiTexture(charm.emoji);
+  }, [charm]);
+
+  const clothingItem = useMemo(() => findClothing(clothing), [clothing]);
+
+  useEffect(() => {
+    if (clothingItem && clothingItem.id !== 'none') {
+      const base = CLOTHING_BASE[clothingItem.slot];
+      if (base) clothingBaseRef.current.set(base[0], base[1], base[2]);
+      if (clothingGroupRef.current) clothingGroupRef.current.position.copy(clothingBaseRef.current);
+    }
+  }, [clothingItem]);
+
+  useEffect(() => {
+    if (charmGroupRef.current) charmGroupRef.current.position.copy(charmBaseRef.current);
   }, [charm]);
 
   useEffect(() => {
@@ -1231,9 +1239,52 @@ const SlimeScene = ({
       if (rightPupilRef.current) rightPupilRef.current.position.set(eyeLookX * 0.85, eyeLookY * 0.85, eyeStyle === 'cyclops' ? 0.15 : 0.11);
     }
 
+    // --- Accessory + face stretch following ---
+    const pullActive = dragHitLocalRef.current != null && dragPullRef.current.lengthSq() > 0.0001;
+
+    const pullInfluence = (bx: number, by: number, bz: number, scale: number) => {
+      if (!pullActive) return { x: 0, y: 0, z: 0 };
+      const dvx = bx - dragHitLocalRef.current!.x;
+      const dvy = by - dragHitLocalRef.current!.y;
+      const dvz = bz - dragHitLocalRef.current!.z;
+      const inf = Math.exp(-(dvx * dvx + dvy * dvy + dvz * dvz) * PULL_FALLOFF) * scale;
+      return { x: dragPullRef.current.x * inf, y: dragPullRef.current.y * inf, z: dragPullRef.current.z * inf };
+    };
+
+    // Mouth follows stretch
     if (mouthRef.current) {
+      const mo = pullInfluence(0, -0.28, 0.9, 0.6);
+      mouthRef.current.position.set(mo.x, -0.28 + mo.y, 0.9 + mo.z);
       mouthRef.current.scale.set(1 + burstGlowRef.current * 0.55, 1 + burstGlowRef.current * 0.25, 1);
       mouthRef.current.rotation.z = Math.sin(t * 1.7) * 0.1;
+    }
+
+    // Eyes follow stretch (offset within their positioning group)
+    {
+      const lo = pullInfluence(-0.3, 0.15, 0.88, 0.5);
+      const ro = pullInfluence(0.3, 0.15, 0.88, 0.5);
+      if (leftEyeGroupRef.current) leftEyeGroupRef.current.position.set(lo.x, lo.y, lo.z);
+      if (rightEyeGroupRef.current) rightEyeGroupRef.current.position.set(ro.x, ro.y, ro.z);
+    }
+
+    // Clothing follows stretch
+    if (clothingGroupRef.current) {
+      clothingGroupRef.current.visible = bodyVisibleRef.current;
+      if (bodyVisibleRef.current) {
+        const base = clothingBaseRef.current;
+        const co = pullInfluence(base.x, base.y, base.z, 1);
+        clothingGroupRef.current.position.set(base.x + co.x, base.y + co.y, base.z + co.z);
+      }
+    }
+
+    // Charm follows stretch
+    if (charmGroupRef.current) {
+      charmGroupRef.current.visible = bodyVisibleRef.current;
+      if (bodyVisibleRef.current) {
+        const base = charmBaseRef.current;
+        const co = pullInfluence(base.x, base.y, base.z, 0.8);
+        charmGroupRef.current.position.set(base.x + co.x, base.y + co.y, base.z + co.z);
+      }
     }
 
     if (sparkleRef.current) {
@@ -1388,9 +1439,11 @@ const SlimeScene = ({
         </group>
 
         {charmTexture && (
-          <sprite position={[0.63, 0.63, 0.28]} scale={[0.5, 0.5, 0.5]}>
-            <spriteMaterial map={charmTexture} transparent depthWrite={false} />
-          </sprite>
+          <group ref={charmGroupRef}>
+            <sprite scale={[0.5, 0.5, 0.5]} renderOrder={10}>
+              <spriteMaterial map={charmTexture} transparent depthWrite={false} depthTest={false} />
+            </sprite>
+          </group>
         )}
 
         {renderEyePair(
@@ -1404,7 +1457,7 @@ const SlimeScene = ({
           <meshStandardMaterial color="#2d3436" roughness={0.45} />
         </mesh>
 
-        <ClothingRenderer clothingId={clothing} />
+        <ClothingRenderer clothingId={clothing} groupRef={clothingGroupRef} />
       </group>
     </>
   );
