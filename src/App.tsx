@@ -637,6 +637,32 @@ export default function App() {
     startEnergyDecay();
   }, [clearBubbleRushTimers, startEnergyDecay, syncPlayHud]);
 
+  const updateCareCooldowns = useCallback((state: SlimeCareState) => {
+    setCareCooldowns({
+      feed: getCooldownRemaining('feed', state),
+      pet: getCooldownRemaining('pet', state),
+      clean: getCooldownRemaining('clean', state),
+      play: getCooldownRemaining('play', state),
+    });
+  }, []);
+
+  const startCareTimer = useCallback(() => {
+    if (careTimerRef.current) window.clearInterval(careTimerRef.current);
+    careTimerRef.current = window.setInterval(() => {
+      setCareState((current) => {
+        updateCareCooldowns(current);
+        return current;
+      });
+    }, 500);
+  }, [updateCareCooldowns]);
+
+  const stopCareTimer = useCallback(() => {
+    if (careTimerRef.current) {
+      window.clearInterval(careTimerRef.current);
+      careTimerRef.current = null;
+    }
+  }, []);
+
   const leavePlayMode = useCallback(() => {
     stopEnergyDecay();
     stopCareTimer();
@@ -715,32 +741,6 @@ export default function App() {
     }
     startBubbleRush();
   }, [endBubbleRush, showToast, startBubbleRush]);
-
-  const updateCareCooldowns = useCallback((state: SlimeCareState) => {
-    setCareCooldowns({
-      feed: getCooldownRemaining('feed', state),
-      pet: getCooldownRemaining('pet', state),
-      clean: getCooldownRemaining('clean', state),
-      play: getCooldownRemaining('play', state),
-    });
-  }, []);
-
-  const startCareTimer = useCallback(() => {
-    if (careTimerRef.current) window.clearInterval(careTimerRef.current);
-    careTimerRef.current = window.setInterval(() => {
-      setCareState((current) => {
-        updateCareCooldowns(current);
-        return current;
-      });
-    }, 500);
-  }, [updateCareCooldowns]);
-
-  const stopCareTimer = useCallback(() => {
-    if (careTimerRef.current) {
-      window.clearInterval(careTimerRef.current);
-      careTimerRef.current = null;
-    }
-  }, []);
 
   const handleCareAction = useCallback((action: CareAction) => {
     if (!playSlime) return;
