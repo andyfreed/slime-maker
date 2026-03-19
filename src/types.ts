@@ -70,3 +70,22 @@ export type EyeStyleId =
 export type ShopType = 'color' | 'sparkle' | 'charm' | 'eye' | 'clothing';
 
 export type PlayMood = 'Chill' | 'Happy' | 'Playful' | 'Hyper' | 'Legendary';
+
+export type CareAction = 'feed' | 'pet' | 'clean' | 'play';
+
+export interface SlimeCareState {
+  level: number;
+  carePoints: number;
+  lastFeed: number;
+  lastPet: number;
+  lastClean: number;
+  lastPlay: number;
+}
+
+export interface CareActionConfig {
+  id: CareAction;
+  name: string;
+  emoji: string;
+  gain: number;
+  cooldownMs: number;
+}

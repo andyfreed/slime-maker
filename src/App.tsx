@@ -16,17 +16,23 @@ import {
   ALL_COLORS,
   ALL_EYES,
   ALL_SPARKLES,
+  CARE_ACTIONS,
   STARTER_CHARMS,
   STARTER_CLOTHING,
   STARTER_COLORS,
   STARTER_EYES,
   STARTER_SPARKLES,
+  canPerformCareAction,
   computePlayMood,
+  defaultCareState,
+  getCooldownRemaining,
+  getLevelName,
+  getLevelProgress,
   findCharm,
   findSparkle,
 } from './gameData';
 import { supabase } from './lib/supabase';
-import type { CharmItem, ClothingItem, EyeStyleId, EyeStyleItem, PlayMood, Profile, ShopType, Slime, SparkleItem } from './types';
+import type { CareAction, CharmItem, ClothingItem, EyeStyleId, EyeStyleItem, PlayMood, Profile, ShopType, Slime, SlimeCareState, SparkleItem } from './types';
 
 const EYES_STORAGE_PREFIX = 'slime-eyes-v1-';
 const CLOTHING_STORAGE_PREFIX = 'slime-clothing-v1-';
@@ -79,6 +85,23 @@ function getSlimeClothing(slimeId: string): string {
 
 function setSlimeClothing(slimeId: string, clothingId: string): void {
   window.localStorage.setItem(CLOTHING_STORAGE_PREFIX + slimeId, clothingId);
+}
+
+const CARE_STORAGE_PREFIX = 'slime-care-v1-';
+
+function getSlimeCare(slimeId: string): SlimeCareState {
+  try {
+    const raw = window.localStorage.getItem(CARE_STORAGE_PREFIX + slimeId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.level === 'number') return parsed;
+    }
+  } catch { /* ignore */ }
+  return defaultCareState();
+}
+
+function setSlimeCare(slimeId: string, state: SlimeCareState): void {
+  window.localStorage.setItem(CARE_STORAGE_PREFIX + slimeId, JSON.stringify(state));
 }
 
 type Screen = 'auth' | 'home' | 'create' | 'collection' | 'friends' | 'shop' | 'play';
@@ -323,6 +346,10 @@ export default function App() {
   const [ownedEyes, setOwnedEyesState] = useState<string[]>(getOwnedEyes);
   const [ownedClothingList, setOwnedClothingState] = useState<string[]>(getOwnedClothing);
 
+  const [careState, setCareState] = useState<SlimeCareState>(defaultCareState);
+  const [careCooldowns, setCareCooldowns] = useState<Record<CareAction, number>>({ feed: 0, pet: 0, clean: 0, play: 0 });
+  const careTimerRef = useRef<number | null>(null);
+
   const [loadingCollection, setLoadingCollection] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -352,7 +379,6 @@ export default function App() {
   const ownedEyeSet = useMemo(() => new Set(ownedEyes), [ownedEyes]);
   const ownedClothingSet = useMemo(() => new Set(ownedClothingList), [ownedClothingList]);
 
-  const canMegaMorph = playHud.energy >= 100;
   const bubbleRushActive = bubbleRushRef.current.active;
   const coinBalance = profile?.coins ?? 0;
 
@@ -613,18 +639,23 @@ export default function App() {
 
   const leavePlayMode = useCallback(() => {
     stopEnergyDecay();
+    stopCareTimer();
     endBubbleRush(false, true);
-  }, [endBubbleRush, stopEnergyDecay]);
+  }, [endBubbleRush, stopCareTimer, stopEnergyDecay]);
 
   const openPlay = useCallback(
     (slime: Slime) => {
       setPlaySlime(slime);
       setPlayEyeStyle(getSlimeEyeStyle(slime.id));
       setPlayClothing(getSlimeClothing(slime.id));
+      const care = getSlimeCare(slime.id);
+      setCareState(care);
+      updateCareCooldowns(care);
       setScreen('play');
       resetPlaySession();
+      startCareTimer();
     },
-    [resetPlaySession],
+    [resetPlaySession, startCareTimer, updateCareCooldowns],
   );
 
   const goScreen = useCallback(
@@ -685,19 +716,95 @@ export default function App() {
     startBubbleRush();
   }, [endBubbleRush, showToast, startBubbleRush]);
 
+  const updateCareCooldowns = useCallback((state: SlimeCareState) => {
+    setCareCooldowns({
+      feed: getCooldownRemaining('feed', state),
+      pet: getCooldownRemaining('pet', state),
+      clean: getCooldownRemaining('clean', state),
+      play: getCooldownRemaining('play', state),
+    });
+  }, []);
+
+  const startCareTimer = useCallback(() => {
+    if (careTimerRef.current) window.clearInterval(careTimerRef.current);
+    careTimerRef.current = window.setInterval(() => {
+      setCareState((current) => {
+        updateCareCooldowns(current);
+        return current;
+      });
+    }, 500);
+  }, [updateCareCooldowns]);
+
+  const stopCareTimer = useCallback(() => {
+    if (careTimerRef.current) {
+      window.clearInterval(careTimerRef.current);
+      careTimerRef.current = null;
+    }
+  }, []);
+
+  const handleCareAction = useCallback((action: CareAction) => {
+    if (!playSlime) return;
+    if (!isOwnPlaySlimeRef.current) return;
+
+    setCareState((current) => {
+      if (!canPerformCareAction(action, current)) {
+        const secs = Math.ceil(getCooldownRemaining(action, current) / 1000);
+        showToast(`Wait ${secs}s to ${action} again!`);
+        return current;
+      }
+
+      const config = CARE_ACTIONS.find((a) => a.id === action);
+      if (!config) return current;
+
+      const next: SlimeCareState = { ...current, carePoints: current.carePoints + config.gain };
+      const now = Date.now();
+      if (action === 'feed') next.lastFeed = now;
+      else if (action === 'pet') next.lastPet = now;
+      else if (action === 'clean') next.lastClean = now;
+      else next.lastPlay = now;
+
+      if (playSlime) setSlimeCare(playSlime.id, next);
+      updateCareCooldowns(next);
+
+      const progress = getLevelProgress(next);
+      if (progress.percent >= 100) {
+        showToast(`Care complete! Mega Morph to reach Level ${next.level + 1}!`);
+      } else {
+        showToast(`${config.emoji} ${config.name}! +${config.gain} care (${Math.floor(progress.percent)}%)`);
+      }
+
+      pixiRef.current?.burst(4);
+      return next;
+    });
+  }, [playSlime, showToast, updateCareCooldowns]);
+
+  const careProgress = getLevelProgress(careState);
+  const canLevelUp = careProgress.percent >= 100;
+
   const handleMegaMorph = useCallback(() => {
-    if (!canMegaMorph) {
-      showToast('Charge to 100% first!');
+    if (!canLevelUp) {
+      showToast('Care for your slime more to unlock Mega Morph!');
       return;
     }
     pixiRef.current?.megaMorph();
     pixiRef.current?.burst(12);
-    awardCoins(5, 'Mega Morph');
+
+    const nextLevel = careState.level + 1;
+    const newCareState: SlimeCareState = {
+      ...careState,
+      level: nextLevel,
+      carePoints: 0,
+    };
+    setCareState(newCareState);
+    if (playSlime) setSlimeCare(playSlime.id, newCareState);
+    updateCareCooldowns(newCareState);
+
+    awardCoins(5 + careState.level * 3, 'Mega Morph');
     comboRef.current = 0;
     energyRef.current = 24;
     lastActionAtRef.current = Date.now();
-    syncPlayHud('Mega Morph unleashed!');
-  }, [awardCoins, canMegaMorph, showToast, syncPlayHud]);
+    syncPlayHud(`MEGA MORPH! Now Level ${nextLevel} — ${getLevelName(nextLevel)}!`);
+  }, [awardCoins, canLevelUp, careState, playSlime, showToast, syncPlayHud, updateCareCooldowns]);
 
   const handleCreateSlime = useCallback(async () => {
     if (!profile) return;
@@ -1206,12 +1313,16 @@ export default function App() {
               {loadingCollection && <div className="subtle">Loading...</div>}
               {!loadingCollection && slimes.length === 0 && <div className="subtle">No slimes yet. Create one!</div>}
               <div className="grid">
-                {slimes.map((slime) => (
-                  <button key={slime.id} className="card" type="button" onClick={() => openPlay(slime)}>
-                    <MiniSlime color={slime.color} sparkle={slime.sparkle} charm={slime.charm} size="small" />
-                    <div className="card-title">{slime.name}</div>
-                  </button>
-                ))}
+                {slimes.map((slime) => {
+                  const care = getSlimeCare(slime.id);
+                  return (
+                    <button key={slime.id} className="card" type="button" onClick={() => openPlay(slime)}>
+                      <MiniSlime color={slime.color} sparkle={slime.sparkle} charm={slime.charm} size="small" />
+                      <div className="card-title">{slime.name}</div>
+                      <div className="card-level">Lv.{care.level} {getLevelName(care.level)}</div>
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -1303,6 +1414,53 @@ export default function App() {
                   : `${playSlime.profiles?.username ?? 'Friend'}'s ${playSlime.name}`}
               </p>
 
+              <div className="level-badge-row">
+                <div className={`level-badge level-${Math.min(careState.level, 10)}`}>
+                  <span className="level-number">Lv.{careState.level}</span>
+                  <span className="level-name">{getLevelName(careState.level)}</span>
+                </div>
+              </div>
+
+              <div className="care-progress-section">
+                <div className="care-progress-header">
+                  <span>Care Progress</span>
+                  <span>{careProgress.current} / {careProgress.needed}</span>
+                </div>
+                <div className="care-track">
+                  <div
+                    className={`care-fill ${canLevelUp ? 'ready' : ''}`}
+                    style={{ width: `${careProgress.percent}%` }}
+                  />
+                </div>
+                <div className="care-hint">
+                  {canLevelUp
+                    ? `Ready to evolve! Press Mega Morph to reach Level ${careState.level + 1}!`
+                    : `Care for ${playSlime.name} to fill the bar and level up!`}
+                </div>
+              </div>
+
+              {playSlime.user_id === profile.id && (
+                <div className="care-actions">
+                  {CARE_ACTIONS.map((action) => {
+                    const ready = canPerformCareAction(action.id, careState);
+                    const cooldownSec = Math.ceil(careCooldowns[action.id] / 1000);
+                    return (
+                      <button
+                        key={action.id}
+                        className={`care-btn ${ready ? 'care-ready' : 'care-cooldown'}`}
+                        type="button"
+                        disabled={!ready}
+                        onClick={() => handleCareAction(action.id)}
+                      >
+                        <span className="care-emoji">{action.emoji}</span>
+                        <span className="care-label">{action.name}</span>
+                        {!ready && <span className="care-timer">{cooldownSec}s</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="play-hud">
                 <div className="play-hud-top">
                   <span>Mood: {playHud.mood}</span>
@@ -1324,6 +1482,7 @@ export default function App() {
                     slime={playSlime}
                     eyeStyle={playEyeStyle}
                     clothing={playClothing}
+                    slimeLevel={careState.level}
                     onInteract={handlePixiInteract}
                   />
                 </Suspense>
@@ -1401,8 +1560,13 @@ export default function App() {
               </div>
 
               <div className="play-buttons">
-                <button className="btn btn-gold small" type="button" onClick={handleMegaMorph} disabled={!canMegaMorph}>
-                  Mega Morph
+                <button
+                  className={`btn small ${canLevelUp ? 'btn-mega-morph' : 'btn-gold'}`}
+                  type="button"
+                  onClick={handleMegaMorph}
+                  disabled={!canLevelUp}
+                >
+                  {canLevelUp ? `Mega Morph → Level ${careState.level + 1}!` : `Mega Morph (care more!)`}
                 </button>
                 <button className="btn btn-purple small" type="button" onClick={handleToggleBubbleRush}>
                   {bubbleRushActive ? 'Stop Bubble Rush' : 'Bubble Rush'}

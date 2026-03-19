@@ -1,4 +1,4 @@
-import type { CharmItem, ClothingItem, ColorItem, EyeStyleItem, PlayMood, SparkleItem } from './types';
+import type { CareAction, CareActionConfig, CharmItem, ClothingItem, ColorItem, EyeStyleItem, PlayMood, SlimeCareState, SparkleItem } from './types';
 
 export const STARTER_COLORS = ['#55efc4', '#74b9ff', '#a29bfe', '#fd79a8', '#ffeaa7'];
 export const STARTER_SPARKLES = ['none'];
@@ -93,4 +93,69 @@ export function computePlayMood(energy: number): PlayMood {
   if (energy >= 45) return 'Playful';
   if (energy >= 20) return 'Happy';
   return 'Chill';
+}
+
+export const CARE_ACTIONS: CareActionConfig[] = [
+  { id: 'feed', name: 'Feed', emoji: '🍎', gain: 15, cooldownMs: 10_000 },
+  { id: 'pet', name: 'Pet', emoji: '💝', gain: 10, cooldownMs: 5_000 },
+  { id: 'clean', name: 'Clean', emoji: '🛁', gain: 20, cooldownMs: 15_000 },
+  { id: 'play', name: 'Play', emoji: '🎾', gain: 12, cooldownMs: 8_000 },
+];
+
+export const LEVEL_THRESHOLDS = [0, 50, 100, 175, 275, 400, 550, 750, 1000, 1300];
+
+export function carePointsForLevel(level: number): number {
+  if (level <= 0) return 0;
+  if (level - 1 < LEVEL_THRESHOLDS.length) return LEVEL_THRESHOLDS[level - 1];
+  const last = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
+  const extra = level - LEVEL_THRESHOLDS.length;
+  return last + extra * 400;
+}
+
+export function getLevelProgress(state: SlimeCareState): { current: number; needed: number; percent: number } {
+  const current = state.carePoints;
+  const needed = carePointsForLevel(state.level);
+  if (needed <= 0) return { current: 0, needed: 1, percent: 100 };
+  return { current, needed, percent: Math.min(100, (current / needed) * 100) };
+}
+
+export function canPerformCareAction(action: CareAction, state: SlimeCareState): boolean {
+  const config = CARE_ACTIONS.find((a) => a.id === action);
+  if (!config) return false;
+  const lastTime = action === 'feed' ? state.lastFeed
+    : action === 'pet' ? state.lastPet
+    : action === 'clean' ? state.lastClean
+    : state.lastPlay;
+  return Date.now() - lastTime >= config.cooldownMs;
+}
+
+export function getCooldownRemaining(action: CareAction, state: SlimeCareState): number {
+  const config = CARE_ACTIONS.find((a) => a.id === action);
+  if (!config) return 0;
+  const lastTime = action === 'feed' ? state.lastFeed
+    : action === 'pet' ? state.lastPet
+    : action === 'clean' ? state.lastClean
+    : state.lastPlay;
+  return Math.max(0, config.cooldownMs - (Date.now() - lastTime));
+}
+
+export function defaultCareState(): SlimeCareState {
+  return { level: 1, carePoints: 0, lastFeed: 0, lastPet: 0, lastClean: 0, lastPlay: 0 };
+}
+
+export const LEVEL_NAMES: Record<number, string> = {
+  1: 'Baby Blob',
+  2: 'Little Slime',
+  3: 'Bouncy Buddy',
+  4: 'Gooey Pal',
+  5: 'Slime Star',
+  6: 'Mega Slime',
+  7: 'Ultra Slime',
+  8: 'Legendary Blob',
+  9: 'Cosmic Slime',
+  10: 'Galactic Overlord',
+};
+
+export function getLevelName(level: number): string {
+  return LEVEL_NAMES[level] ?? `Level ${level} Slime`;
 }
