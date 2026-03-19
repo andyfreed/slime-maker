@@ -21,6 +21,7 @@ interface PixiSlimeStageProps {
   slime: Slime | null;
   eyeStyle?: EyeStyleId;
   clothing?: string;
+  slimeLevel?: number;
   onInteract?: (kind: InteractionKind) => void;
 }
 
@@ -617,12 +618,14 @@ const SlimeScene = ({
   slime,
   eyeStyle = 'normal',
   clothing = 'none',
+  slimeLevel = 1,
   onInteract,
   onReady,
 }: {
   slime: Slime;
   eyeStyle?: EyeStyleId;
   clothing?: string;
+  slimeLevel?: number;
   onInteract?: (kind: InteractionKind) => void;
   onReady: (controls: StageControls | null) => void;
 }) => {
@@ -1051,7 +1054,8 @@ const SlimeScene = ({
     currentPosRef.current.lerp(targetPosRef.current, 0.12 * d);
     currentScaleRef.current.lerp(targetScaleRef.current, 0.14 * d);
 
-    const breathe = 1 + Math.sin(t * 1.8) * 0.022;
+    const levelScale = 1 + Math.min(slimeLevel - 1, 9) * 0.04;
+    const breathe = (1 + Math.sin(t * 1.8) * 0.022) * levelScale;
     const megaActive = megaStateRef.current.active;
 
     if (rootRef.current) {
@@ -1346,9 +1350,10 @@ const SlimeScene = ({
     }
     if (outerRef.current && bodyVisibleRef.current) {
       const mat = outerRef.current.material as THREE.MeshPhysicalMaterial;
-      mat.clearcoat = clamp(0.8 + burstGlowRef.current * 0.65, 0.8, 1);
-      mat.sheen = clamp(0.42 + burstGlowRef.current * 0.5, 0.42, 0.95);
-      mat.sheenRoughness = clamp(0.38 - burstGlowRef.current * 0.2, 0.16, 0.38);
+      const levelGlow = Math.min(slimeLevel - 1, 9) * 0.04;
+      mat.clearcoat = clamp(0.8 + burstGlowRef.current * 0.65 + levelGlow, 0.8, 1);
+      mat.sheen = clamp(0.42 + burstGlowRef.current * 0.5 + levelGlow * 0.8, 0.42, 0.95);
+      mat.sheenRoughness = clamp(0.38 - burstGlowRef.current * 0.2 - levelGlow * 0.3, 0.1, 0.38);
     }
     burstGlowRef.current = Math.max(0, burstGlowRef.current - delta * 1.8);
   });
@@ -1464,7 +1469,7 @@ const SlimeScene = ({
 };
 
 export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStageProps>(
-  function PixiSlimeStage({ slime, eyeStyle, clothing, onInteract }, ref) {
+  function PixiSlimeStage({ slime, eyeStyle, clothing, slimeLevel, onInteract }, ref) {
     const controlsRef = useRef<StageControls | null>(null);
 
     useImperativeHandle(ref, () => ({
@@ -1490,6 +1495,7 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
             slime={slime}
             eyeStyle={eyeStyle}
             clothing={clothing}
+            slimeLevel={slimeLevel}
             onInteract={onInteract}
             onReady={(controls) => { controlsRef.current = controls; }}
           />

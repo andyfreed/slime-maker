@@ -478,6 +478,12 @@ h3 {
   font-size: 0.85rem;
 }
 
+.card-level {
+  font-size: 0.78rem;
+  color: rgba(85, 239, 196, 0.9);
+  font-weight: 800;
+}
+
 .subtle {
   color: var(--text-soft);
   text-align: center;
@@ -887,6 +893,190 @@ h3 {
   font-size: 0.9rem;
 }
 
+/* ---- Level Badge ---- */
+
+.level-badge-row {
+  display: flex;
+  justify-content: center;
+}
+
+.level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  animation: badgePulse 3s ease-in-out infinite;
+}
+
+.level-number {
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+}
+
+.level-name {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.level-1 { border-color: rgba(116, 185, 255, 0.5); }
+.level-2 { border-color: rgba(85, 239, 196, 0.5); background: linear-gradient(135deg, rgba(85, 239, 196, 0.2), rgba(255, 255, 255, 0.08)); }
+.level-3 { border-color: rgba(162, 155, 254, 0.5); background: linear-gradient(135deg, rgba(162, 155, 254, 0.2), rgba(255, 255, 255, 0.08)); }
+.level-4 { border-color: rgba(253, 121, 168, 0.5); background: linear-gradient(135deg, rgba(253, 121, 168, 0.2), rgba(255, 255, 255, 0.08)); }
+.level-5 { border-color: rgba(255, 234, 167, 0.6); background: linear-gradient(135deg, rgba(255, 234, 167, 0.25), rgba(253, 203, 110, 0.15)); }
+.level-6 { border-color: rgba(243, 156, 18, 0.6); background: linear-gradient(135deg, rgba(243, 156, 18, 0.25), rgba(241, 196, 15, 0.15)); }
+.level-7 { border-color: rgba(232, 67, 147, 0.6); background: linear-gradient(135deg, rgba(232, 67, 147, 0.2), rgba(108, 92, 231, 0.15)); }
+.level-8 { border-color: rgba(108, 92, 231, 0.6); background: linear-gradient(135deg, rgba(108, 92, 231, 0.25), rgba(162, 155, 254, 0.2)); }
+.level-9 { border-color: rgba(0, 206, 201, 0.6); background: linear-gradient(135deg, rgba(0, 206, 201, 0.25), rgba(85, 239, 196, 0.15)); }
+.level-10 { border-color: rgba(255, 215, 0, 0.7); background: linear-gradient(135deg, rgba(255, 215, 0, 0.3), rgba(255, 165, 0, 0.2)); box-shadow: 0 0 20px rgba(255, 215, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.12); }
+
+@keyframes badgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+/* ---- Care Progress ---- */
+
+.care-progress-section {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.care-progress-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 800;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+}
+
+.care-track {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.care-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #55efc4, #43e97b, #38f9d7);
+  box-shadow: 0 0 12px rgba(85, 239, 196, 0.6);
+  transition: width 0.4s ease;
+}
+
+.care-fill.ready {
+  background: linear-gradient(90deg, #ffeaa7, #fdcb6e, #f39c12, #f9ca24);
+  box-shadow: 0 0 20px rgba(255, 234, 167, 0.9);
+  animation: careGlow 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes careGlow {
+  0% { box-shadow: 0 0 12px rgba(255, 234, 167, 0.6); }
+  100% { box-shadow: 0 0 24px rgba(255, 234, 167, 1), 0 0 40px rgba(243, 156, 18, 0.4); }
+}
+
+.care-hint {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 700;
+}
+
+/* ---- Care Action Buttons ---- */
+
+.care-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.care-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  transition: transform 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+
+.care-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 55%);
+  opacity: 0.5;
+}
+
+.care-btn.care-ready {
+  border-color: rgba(85, 239, 196, 0.5);
+  background: rgba(85, 239, 196, 0.15);
+}
+
+.care-btn.care-ready:hover {
+  transform: translateY(-2px);
+  background: rgba(85, 239, 196, 0.25);
+  box-shadow: 0 6px 18px rgba(85, 239, 196, 0.3);
+}
+
+.care-btn.care-ready:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.care-btn.care-cooldown {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.care-emoji {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.care-label {
+  font-size: 0.8rem;
+}
+
+.care-timer {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ---- Mega Morph Button (evolved) ---- */
+
+.btn-mega-morph {
+  background: linear-gradient(135deg, #ffeaa7, #fdcb6e, #f39c12, #e17055);
+  animation: megaMorphPulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(243, 156, 18, 0.5), 0 8px 26px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes megaMorphPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(243, 156, 18, 0.5), 0 8px 26px rgba(0, 0, 0, 0.2); }
+  50% { transform: scale(1.04); box-shadow: 0 0 32px rgba(243, 156, 18, 0.8), 0 8px 30px rgba(0, 0, 0, 0.25); }
+}
+
+.btn-mega-morph:hover {
+  transform: scale(1.06) translateY(-2px);
+}
+
 .play-customizer {
   display: flex;
   flex-direction: column;
@@ -1000,6 +1190,19 @@ body.ios-keyboard-open .auth-card {
   .play-buttons .btn {
     flex: 1 1 calc(50% - 8px);
     max-width: none;
+  }
+
+  .care-actions {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .care-emoji {
+    font-size: 1.3rem;
+  }
+
+  .care-btn {
+    padding: 8px 4px;
   }
 }
 
