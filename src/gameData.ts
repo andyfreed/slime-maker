@@ -96,20 +96,20 @@ export function computePlayMood(energy: number): PlayMood {
 }
 
 export const CARE_ACTIONS: CareActionConfig[] = [
-  { id: 'feed', name: 'Feed', emoji: '🍎', gain: 15, cooldownMs: 10_000 },
-  { id: 'pet', name: 'Pet', emoji: '💝', gain: 10, cooldownMs: 5_000 },
-  { id: 'clean', name: 'Clean', emoji: '🛁', gain: 20, cooldownMs: 15_000 },
-  { id: 'play', name: 'Play', emoji: '🎾', gain: 12, cooldownMs: 8_000 },
+  { id: 'feed', name: 'Feed', emoji: '🍎', gain: 10, cooldownMs: 12_000 },
+  { id: 'pet', name: 'Pet', emoji: '💝', gain: 6, cooldownMs: 6_000 },
+  { id: 'clean', name: 'Clean', emoji: '🛁', gain: 14, cooldownMs: 18_000 },
+  { id: 'play', name: 'Play', emoji: '🎾', gain: 8, cooldownMs: 10_000 },
 ];
 
-export const LEVEL_THRESHOLDS = [0, 50, 100, 175, 275, 400, 550, 750, 1000, 1300];
+export const LEVEL_THRESHOLDS = [0, 80, 175, 300, 475, 700, 975, 1300, 1700, 2200];
 
 export function carePointsForLevel(level: number): number {
   if (level <= 0) return 0;
   if (level - 1 < LEVEL_THRESHOLDS.length) return LEVEL_THRESHOLDS[level - 1];
   const last = LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
   const extra = level - LEVEL_THRESHOLDS.length;
-  return last + extra * 400;
+  return last + extra * 700;
 }
 
 export function getLevelProgress(state: SlimeCareState): { current: number; needed: number; percent: number } {
