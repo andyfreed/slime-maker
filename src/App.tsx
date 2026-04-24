@@ -1086,6 +1086,10 @@ export default function App() {
         <div className="fx-grid" />
       </div>
 
+      <a className="site-exit" href="/" aria-label="Back to the main site">
+        ← emmy's site
+      </a>
+
       {profile && (
         <>
           <button className="coin-display" type="button" onClick={() => goScreen('shop')}>

@@ -373,7 +373,8 @@ h3 {
 }
 
 .coin-display,
-.user-display {
+.user-display,
+.site-exit {
   position: fixed;
   z-index: 4;
   top: calc(12px + env(safe-area-inset-top));
@@ -389,12 +390,21 @@ h3 {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
 
+.site-exit {
+  left: calc(12px + env(safe-area-inset-left));
+  text-decoration: none;
+}
+.site-exit:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
 .coin-display {
   right: calc(12px + env(safe-area-inset-right));
 }
 
 .user-display {
   left: calc(12px + env(safe-area-inset-left));
+  top: calc(60px + env(safe-area-inset-top));
 }
 
 .preview-wrap {
@@ -1172,10 +1182,14 @@ body.ios-keyboard-open .auth-card {
   }
 
   .coin-display,
-  .user-display {
+  .user-display,
+  .site-exit {
     top: calc(8px + env(safe-area-inset-top));
     padding: 6px 10px;
     font-size: 0.85rem;
+  }
+  .user-display {
+    top: calc(50px + env(safe-area-inset-top));
   }
 
   .grid {
