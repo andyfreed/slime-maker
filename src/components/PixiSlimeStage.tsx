@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { MeshTransmissionMaterial } from '@react-three/drei';
+import { ContactShadows, Environment, MeshTransmissionMaterial } from '@react-three/drei';
 import {
   Bloom,
   ChromaticAberration,
@@ -667,6 +667,76 @@ const SSS_FRAGMENT = /* glsl */ `
     gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
   }
 `;
+
+// ---- Internal bubbles (drifting glowing particles suspended inside the slime) ----
+
+function InternalBubbles({
+  color,
+  count = 14,
+  radius = 0.55,
+}: { color: THREE.Color | string; count?: number; radius?: number }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  const bubbles = useMemo(() => {
+    return Array.from({ length: count }, () => {
+      const dir = new THREE.Vector3(
+        Math.random() - 0.5,
+        Math.random() - 0.5,
+        Math.random() - 0.5,
+      ).normalize();
+      const r = radius * (0.2 + Math.random() * 0.75);
+      return {
+        origin: dir.multiplyScalar(r),
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.25 + Math.random() * 0.6,
+        wobbleX: 0.06 + Math.random() * 0.1,
+        wobbleY: 0.05 + Math.random() * 0.09,
+        wobbleZ: 0.03 + Math.random() * 0.07,
+        size: 0.022 + Math.random() * 0.05,
+      };
+    });
+  }, [count, radius]);
+
+  useEffect(() => {
+    if (!matRef.current) return;
+    const c = color instanceof THREE.Color ? color : new THREE.Color(color);
+    matRef.current.color.copy(c);
+    matRef.current.emissive.copy(c);
+  }, [color]);
+
+  useFrame((state) => {
+    if (!meshRef.current) return;
+    const t = state.clock.elapsedTime;
+    for (let i = 0; i < bubbles.length; i++) {
+      const b = bubbles[i];
+      dummy.position.set(
+        b.origin.x + Math.sin(t * b.speed + b.phase) * b.wobbleX,
+        b.origin.y + Math.cos(t * b.speed * 0.7 + b.phase) * b.wobbleY,
+        b.origin.z + Math.sin(t * b.speed * 0.5 + b.phase * 0.5) * b.wobbleZ,
+      );
+      dummy.scale.setScalar(b.size);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+    }
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
+      <sphereGeometry args={[1, 12, 12]} />
+      <meshStandardMaterial
+        ref={matRef}
+        emissiveIntensity={1.2}
+        transparent
+        opacity={0.72}
+        toneMapped={false}
+        depthWrite={false}
+      />
+    </instancedMesh>
+  );
+}
 
 function SlimeSSSMaterial({ color, opacity = 0.6 }: { color: THREE.Color | string; opacity?: number }) {
   const ref = useRef<THREE.ShaderMaterial>(null);
@@ -1456,16 +1526,25 @@ const SlimeScene = ({
 
   return (
     <>
-      <color attach="background" args={['#000000']} />
-      <ambientLight intensity={0.62} />
-      <directionalLight position={[2.6, 2.2, 2.5]} intensity={1.15} color="#f4f8ff" />
-      <directionalLight position={[-2.2, -1.5, 1.7]} intensity={0.45} color="#9bc8ff" />
-      <pointLight position={[0, 1.7, 2.4]} intensity={1.1} color="#ffd6f8" />
+      <color attach="background" args={['#140a2a']} />
+      <fog attach="fog" args={['#140a2a', 5.5, 10]} />
+      <Environment preset="city" environmentIntensity={0.9} />
+      <ambientLight intensity={0.38} />
+      <directionalLight position={[2.6, 2.2, 2.5]} intensity={1.6} color="#fff3e0" />
+      <directionalLight position={[-2.2, -1.5, 1.7]} intensity={0.55} color="#9bc8ff" />
+      <pointLight position={[0, 1.7, 2.4]} intensity={1.4} color="#ffd6f8" />
+      <pointLight position={[-1.4, -0.8, 1.2]} intensity={0.6} color={baseColor} distance={3} />
 
-      <mesh position={[0, -1.5, -0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.52, 64]} />
-        <meshBasicMaterial color="#000000" transparent opacity={0.2} />
-      </mesh>
+      <ContactShadows
+        position={[0, -1.48, 0]}
+        opacity={0.55}
+        scale={4}
+        blur={2.8}
+        far={1.6}
+        resolution={512}
+        color="#000000"
+      />
+
 
       <mesh ref={shockwaveRef} position={[0, 0, 0.5]} visible={false}>
         <ringGeometry args={[0.8, 1, 64]} />
@@ -1525,6 +1604,8 @@ const SlimeScene = ({
         <mesh ref={innerRef} geometry={innerGeometry} position={[0, 0.05, -0.04]}>
           <SlimeSSSMaterial color={innerColor} opacity={0.6} />
         </mesh>
+
+        <InternalBubbles color={rimColor} count={14} radius={0.55} />
 
         <group ref={sparkleRef}>
           {sparklePoints.map((point, index) => (
@@ -1593,25 +1674,26 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
           />
           <EffectComposer multisampling={4} enableNormalPass={false}>
             <Bloom
-              intensity={0.55}
-              luminanceThreshold={0.62}
-              luminanceSmoothing={0.25}
+              intensity={1.15}
+              luminanceThreshold={0.25}
+              luminanceSmoothing={0.35}
               mipmapBlur
+              radius={0.85}
             />
             <DepthOfField
-              focusDistance={0.015}
-              focalLength={0.04}
-              bokehScale={2}
+              focusDistance={0.012}
+              focalLength={0.05}
+              bokehScale={3.5}
             />
             <ChromaticAberration
-              offset={new THREE.Vector2(0.0008, 0.0008)}
+              offset={new THREE.Vector2(0.0018, 0.0018)}
               blendFunction={BlendFunction.NORMAL}
               radialModulation={false}
               modulationOffset={0}
             />
             <Vignette
-              offset={0.3}
-              darkness={0.55}
+              offset={0.22}
+              darkness={0.78}
               blendFunction={BlendFunction.NORMAL}
             />
           </EffectComposer>
