@@ -1165,7 +1165,6 @@ const SlimeScene = ({
   const rootRef = useRef<THREE.Group>(null);
   const outerRef = useRef<THREE.Mesh>(null);
   const innerRef = useRef<THREE.Mesh>(null);
-  const rimRef = useRef<THREE.Mesh>(null);
   const leftEyeGroupRef = useRef<THREE.Group>(null);
   const rightEyeGroupRef = useRef<THREE.Group>(null);
   const leftPupilRef = useRef<THREE.Mesh>(null);
@@ -1225,10 +1224,6 @@ const SlimeScene = ({
   const innerGeometry = useMemo(
     () => new THREE.SphereGeometry(0.92, preset.innerSegments, preset.innerSegments),
     [preset.innerSegments],
-  );
-  const rimGeometry = useMemo(
-    () => new THREE.SphereGeometry(1.03, preset.rimSegments, preset.rimSegments),
-    [preset.rimSegments],
   );
   const burstGeometry = useMemo(() => new THREE.SphereGeometry(0.03, 8, 8), []);
   const fragmentGeometry = useMemo(() => new THREE.SphereGeometry(1, 32, 32), []);
@@ -1399,12 +1394,11 @@ const SlimeScene = ({
       cleanupMegaFragments();
       geometry.dispose();
       innerGeometry.dispose();
-      rimGeometry.dispose();
       burstGeometry.dispose();
       fragmentGeometry.dispose();
       megaFragGeometry.dispose();
     };
-  }, [burstGeometry, geometry, innerGeometry, rimGeometry, fragmentGeometry, megaFragGeometry]);
+  }, [burstGeometry, geometry, innerGeometry, fragmentGeometry, megaFragGeometry]);
 
   const cleanupMegaFragments = (): void => {
     const state = megaStateRef.current;
@@ -1874,9 +1868,6 @@ const SlimeScene = ({
       outerRef.current.visible = (mat.opacity ?? 0) > 0.01;
     }
     if (innerRef.current) innerRef.current.visible = bodyVisibleRef.current;
-    if (rimRef.current) {
-      (rimRef.current.material as THREE.MeshBasicMaterial).opacity = bodyVisibleRef.current ? clamp(0.14 + burstGlowRef.current * 0.28, 0.14, 0.42) : 0;
-    }
     if (outerRef.current && bodyVisibleRef.current) {
       const mat = outerRef.current.material as THREE.MeshPhysicalMaterial;
       const levelGlow = Math.min(slimeLevel - 1, 9) * 0.04;
@@ -1943,10 +1934,6 @@ const SlimeScene = ({
       >
         <group ref={particleLayerRef} />
         <group ref={fragmentLayerRef} />
-
-        <mesh ref={rimRef} geometry={rimGeometry}>
-          <meshBasicMaterial color={rimColor} transparent opacity={0.14} side={THREE.BackSide} depthWrite={false} />
-        </mesh>
 
         <mesh ref={outerRef} geometry={geometry}>
           <MeshTransmissionMaterial
