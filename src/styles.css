@@ -639,8 +639,8 @@ h3 {
 .play-stage-wrap {
   position: relative;
   width: 100%;
-  max-width: 500px;
-  height: clamp(290px, 48vh, 370px);
+  max-width: 960px;
+  height: clamp(360px, 62vh, 560px);
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: radial-gradient(
@@ -1168,7 +1168,7 @@ body.ios-keyboard-open .auth-card {
   }
 
   .play-stage-wrap {
-    height: clamp(280px, 44vh, 334px);
+    height: clamp(340px, 60vh, 520px);
   }
 
   .coin-display,

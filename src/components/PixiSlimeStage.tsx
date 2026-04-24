@@ -131,27 +131,6 @@ function darken(hex: string, amount: number): THREE.Color {
   return hexToColor(hex).multiplyScalar(1 - amount);
 }
 
-function createEmojiTexture(emoji: string): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.clearRect(0, 0, size, size);
-    ctx.font = '190px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(emoji, size / 2, size / 2 + 4);
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
-  return texture;
-}
-
 function deriveIrisColor(slimeColor: string): THREE.Color {
   const base = hexToColor(slimeColor);
   const hsl = { h: 0, s: 0, l: 0 };
@@ -599,23 +578,412 @@ const CLOTHING_BASE: Record<string, [number, number, number]> = {
 };
 const CLOTHING_SCALE: Record<string, number> = { hat: 0.7, face: 0.6, neck: 0.55, body: 0.8 };
 
+// Custom 3D clothing/accessory meshes (replacing emoji sprites).
+
+function TopHat() {
+  return (
+    <group>
+      <mesh position={[0, 0.32, 0]}>
+        <cylinderGeometry args={[0.34, 0.34, 0.66, 32]} />
+        <meshStandardMaterial color="#0a0a10" roughness={0.35} metalness={0.25} />
+      </mesh>
+      <mesh position={[0, -0.02, 0]}>
+        <cylinderGeometry args={[0.62, 0.62, 0.07, 40]} />
+        <meshStandardMaterial color="#0a0a10" roughness={0.4} metalness={0.2} />
+      </mesh>
+      <mesh position={[0, 0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.35, 0.035, 10, 40]} />
+        <meshStandardMaterial color="#c9163a" roughness={0.35} metalness={0.15} />
+      </mesh>
+    </group>
+  );
+}
+
+function CowboyHat() {
+  return (
+    <group>
+      <mesh position={[0, 0.2, 0]}>
+        <sphereGeometry args={[0.38, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+        <meshStandardMaterial color="#7a4a22" roughness={0.75} />
+      </mesh>
+      <mesh position={[0, 0.42, 0]} scale={[0.8, 0.4, 0.8]}>
+        <boxGeometry args={[0.6, 0.12, 0.6]} />
+        <meshStandardMaterial color="#7a4a22" roughness={0.75} />
+      </mesh>
+      <mesh position={[0, 0, 0]} rotation={[0.12, 0, 0.08]}>
+        <cylinderGeometry args={[0.82, 0.82, 0.05, 48]} />
+        <meshStandardMaterial color="#8b5a2b" roughness={0.78} />
+      </mesh>
+      <mesh position={[0, 0.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.38, 0.022, 8, 32]} />
+        <meshStandardMaterial color="#5a3a1a" roughness={0.6} />
+      </mesh>
+    </group>
+  );
+}
+
+function PartyHat() {
+  return (
+    <group>
+      <mesh position={[0, 0.45, 0]}>
+        <coneGeometry args={[0.4, 0.95, 24, 1]} />
+        <meshStandardMaterial
+          color="#ff4fa3"
+          roughness={0.4}
+          metalness={0.1}
+          emissive="#ff4fa3"
+          emissiveIntensity={0.12}
+        />
+      </mesh>
+      <mesh position={[0, 0.98, 0]}>
+        <sphereGeometry args={[0.1, 20, 20]} />
+        <meshStandardMaterial color="#fff7d8" roughness={0.3} emissive="#ffef9f" emissiveIntensity={0.2} />
+      </mesh>
+      {[0, 0.18, 0.36, 0.54, 0.72].map((y, i) => (
+        <mesh key={i} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.4 - y * 0.35, 0.012, 6, 24]} />
+          <meshStandardMaterial color={i % 2 === 0 ? '#ffd84a' : '#4fd5ff'} roughness={0.4} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function Beanie() {
+  return (
+    <group>
+      <mesh position={[0, 0.1, 0]}>
+        <sphereGeometry args={[0.46, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+        <meshStandardMaterial color="#d94a66" roughness={0.95} />
+      </mesh>
+      <mesh position={[0, -0.05, 0]}>
+        <cylinderGeometry args={[0.46, 0.46, 0.1, 32]} />
+        <meshStandardMaterial color="#f0c2c2" roughness={0.98} />
+      </mesh>
+      <mesh position={[0, 0.5, 0]}>
+        <sphereGeometry args={[0.13, 16, 16]} />
+        <meshStandardMaterial color="#fff6f6" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+function Sunglasses() {
+  return (
+    <group>
+      {[-0.19, 0.19].map((x, i) => (
+        <group key={i} position={[x, 0, 0]}>
+          <mesh>
+            <torusGeometry args={[0.13, 0.022, 10, 32]} />
+            <meshStandardMaterial color="#0a0a12" roughness={0.25} metalness={0.6} />
+          </mesh>
+          <mesh position={[0, 0, -0.01]}>
+            <circleGeometry args={[0.12, 32]} />
+            <meshPhysicalMaterial
+              color="#050820"
+              roughness={0.08}
+              metalness={0.2}
+              clearcoat={1}
+              clearcoatRoughness={0.05}
+              transmission={0.15}
+              opacity={0.92}
+              transparent
+            />
+          </mesh>
+        </group>
+      ))}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.12, 0.02, 0.02]} />
+        <meshStandardMaterial color="#0a0a12" roughness={0.25} metalness={0.6} />
+      </mesh>
+    </group>
+  );
+}
+
+function Monocle() {
+  return (
+    <group position={[0.18, 0, 0]}>
+      <mesh>
+        <torusGeometry args={[0.14, 0.02, 10, 36]} />
+        <meshStandardMaterial color="#d4af37" roughness={0.2} metalness={0.9} />
+      </mesh>
+      <mesh>
+        <circleGeometry args={[0.13, 32]} />
+        <meshPhysicalMaterial color="#fff" roughness={0.02} transmission={0.92} opacity={0.35} transparent ior={1.4} />
+      </mesh>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <mesh key={i} position={[0.12 + i * 0.018, -0.02 - i * 0.022, 0]}>
+          <torusGeometry args={[0.012, 0.004, 6, 12]} />
+          <meshStandardMaterial color="#d4af37" roughness={0.2} metalness={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function BowTie() {
+  return (
+    <group>
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={[side * 0.18, 0, 0]} rotation={[0, 0, side * 0.35]}>
+          <coneGeometry args={[0.18, 0.32, 3, 1]} />
+          <meshStandardMaterial color="#c9163a" roughness={0.35} metalness={0.1} />
+        </mesh>
+      ))}
+      <mesh>
+        <cylinderGeometry args={[0.06, 0.06, 0.14, 16]} />
+        <meshStandardMaterial color="#8a0e26" roughness={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+function Scarf() {
+  return (
+    <group>
+      <mesh>
+        <torusGeometry args={[0.48, 0.11, 12, 40]} />
+        <meshStandardMaterial color="#4a7bd4" roughness={0.95} />
+      </mesh>
+      <mesh position={[0.28, -0.3, 0.1]} rotation={[0, 0, -0.3]}>
+        <boxGeometry args={[0.14, 0.4, 0.06]} />
+        <meshStandardMaterial color="#4a7bd4" roughness={0.95} />
+      </mesh>
+      <mesh position={[0.22, -0.52, 0.1]} rotation={[0, 0, -0.3]}>
+        <boxGeometry args={[0.14, 0.08, 0.06]} />
+        <meshStandardMaterial color="#f0e9d2" roughness={0.98} />
+      </mesh>
+    </group>
+  );
+}
+
+function Cape() {
+  return (
+    <group position={[0, 0, -0.1]}>
+      <mesh scale={[1, 1.2, 0.6]} rotation={[0.15, 0, 0]}>
+        <sphereGeometry args={[0.6, 24, 20, 0, Math.PI, Math.PI * 0.05, Math.PI * 0.9]} />
+        <meshStandardMaterial color="#3a1b5e" roughness={0.6} metalness={0.05} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.35, 0]}>
+        <torusGeometry args={[0.35, 0.04, 8, 24]} />
+        <meshStandardMaterial color="#d4af37" roughness={0.2} metalness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+function Tutu() {
+  return (
+    <group>
+      {[0, 0.08, 0.16].map((y, i) => (
+        <mesh key={i} position={[0, y, 0]}>
+          <coneGeometry args={[0.7 - i * 0.1, 0.1, 32, 1, true]} />
+          <meshStandardMaterial
+            color="#ffc2e5"
+            roughness={0.9}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={0.85}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// Custom 3D charm meshes (replacing emoji sprites).
+
+function CharmBow() {
+  return (
+    <group>
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={[side * 0.12, 0, 0]} rotation={[0, 0, side * 0.45]}>
+          <coneGeometry args={[0.12, 0.24, 3, 1]} />
+          <meshStandardMaterial color="#ff6fa0" roughness={0.35} />
+        </mesh>
+      ))}
+      <mesh>
+        <cylinderGeometry args={[0.04, 0.04, 0.1, 16]} />
+        <meshStandardMaterial color="#d94f7c" roughness={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+function CharmCrown() {
+  return (
+    <group>
+      <mesh>
+        <cylinderGeometry args={[0.22, 0.22, 0.14, 16]} />
+        <meshStandardMaterial color="#e9c537" roughness={0.2} metalness={0.85} />
+      </mesh>
+      {Array.from({ length: 5 }).map((_, i) => {
+        const a = (i / 5) * Math.PI * 2;
+        return (
+          <mesh key={i} position={[Math.cos(a) * 0.22, 0.12, Math.sin(a) * 0.22]}>
+            <coneGeometry args={[0.06, 0.12, 4, 1]} />
+            <meshStandardMaterial color="#f0d55c" roughness={0.18} metalness={0.9} />
+          </mesh>
+        );
+      })}
+      {Array.from({ length: 5 }).map((_, i) => {
+        const a = ((i + 0.5) / 5) * Math.PI * 2;
+        return (
+          <mesh key={i} position={[Math.cos(a) * 0.22, 0.02, Math.sin(a) * 0.22]}>
+            <octahedronGeometry args={[0.03]} />
+            <meshPhysicalMaterial color="#ff2e6a" roughness={0.05} metalness={0.3} clearcoat={1} emissive="#ff2e6a" emissiveIntensity={0.2} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function CharmFlower() {
+  return (
+    <group>
+      <mesh>
+        <sphereGeometry args={[0.06, 16, 16]} />
+        <meshStandardMaterial color="#ffd24a" roughness={0.35} emissive="#ffb347" emissiveIntensity={0.15} />
+      </mesh>
+      {Array.from({ length: 6 }).map((_, i) => {
+        const a = (i / 6) * Math.PI * 2;
+        return (
+          <mesh key={i} position={[Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12]} rotation={[0, -a, 0.1]}>
+            <sphereGeometry args={[0.09, 12, 10]} />
+            <meshStandardMaterial color="#ff9ccf" roughness={0.4} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function CharmStar() {
+  const starShape = useMemo(() => {
+    const shape = new THREE.Shape();
+    const outer = 0.16;
+    const inner = 0.07;
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+    }
+    shape.closePath();
+    return shape;
+  }, []);
+
+  return (
+    <mesh>
+      <extrudeGeometry args={[starShape, { depth: 0.05, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.01, bevelSegments: 2 }]} />
+      <meshPhysicalMaterial color="#ffe34a" roughness={0.1} metalness={0.6} clearcoat={1} emissive="#ffb347" emissiveIntensity={0.35} />
+    </mesh>
+  );
+}
+
+function CharmButterfly() {
+  return (
+    <group>
+      {[-1, 1].map((side) => (
+        <group key={side} rotation={[0, side * 0.25, 0]}>
+          <mesh position={[side * 0.18, 0.05, 0]}>
+            <sphereGeometry args={[0.14, 16, 16]} />
+            <meshStandardMaterial color="#a37bff" roughness={0.4} side={THREE.DoubleSide} transparent opacity={0.92} />
+          </mesh>
+          <mesh position={[side * 0.15, -0.12, 0]}>
+            <sphereGeometry args={[0.1, 14, 14]} />
+            <meshStandardMaterial color="#6f52d8" roughness={0.45} side={THREE.DoubleSide} transparent opacity={0.92} />
+          </mesh>
+        </group>
+      ))}
+      <mesh>
+        <capsuleGeometry args={[0.02, 0.22, 8, 16]} />
+        <meshStandardMaterial color="#2d2150" roughness={0.5} />
+      </mesh>
+    </group>
+  );
+}
+
+function CharmHeart() {
+  return (
+    <group>
+      <mesh position={[-0.06, 0.05, 0]}>
+        <sphereGeometry args={[0.1, 20, 20]} />
+        <meshPhysicalMaterial color="#a56eff" roughness={0.2} metalness={0.15} clearcoat={1} emissive="#5b2cd4" emissiveIntensity={0.18} />
+      </mesh>
+      <mesh position={[0.06, 0.05, 0]}>
+        <sphereGeometry args={[0.1, 20, 20]} />
+        <meshPhysicalMaterial color="#a56eff" roughness={0.2} metalness={0.15} clearcoat={1} emissive="#5b2cd4" emissiveIntensity={0.18} />
+      </mesh>
+      <mesh position={[0, -0.07, 0]} rotation={[0, 0, Math.PI / 4]}>
+        <boxGeometry args={[0.17, 0.17, 0.17]} />
+        <meshPhysicalMaterial color="#a56eff" roughness={0.2} metalness={0.15} clearcoat={1} emissive="#5b2cd4" emissiveIntensity={0.18} />
+      </mesh>
+    </group>
+  );
+}
+
+function CharmUnicorn() {
+  return (
+    <group>
+      <mesh position={[0, 0.1, 0]}>
+        <coneGeometry args={[0.05, 0.35, 16]} />
+        <meshPhysicalMaterial
+          color="#fff2ff"
+          roughness={0.1}
+          metalness={0.35}
+          clearcoat={1}
+          emissive="#ff8fd9"
+          emissiveIntensity={0.25}
+          iridescence={1}
+          iridescenceIOR={1.8}
+        />
+      </mesh>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <mesh key={i} position={[0, -0.05 + i * 0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.045 - i * 0.004, 0.006, 6, 16]} />
+          <meshStandardMaterial color="#ff9cd2" roughness={0.3} metalness={0.5} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+const CHARM_COMPONENTS: Record<string, React.FC> = {
+  bow: CharmBow,
+  crown: CharmCrown,
+  flower: CharmFlower,
+  star: CharmStar,
+  butterfly: CharmButterfly,
+  heart: CharmHeart,
+  unicorn: CharmUnicorn,
+};
+
+const CLOTHING_COMPONENTS: Record<string, React.FC> = {
+  tophat: TopHat,
+  cowboy: CowboyHat,
+  partyhat: PartyHat,
+  beanie: Beanie,
+  sunglasses: Sunglasses,
+  monocle: Monocle,
+  bowtie: BowTie,
+  scarf: Scarf,
+  cape: Cape,
+  tutu: Tutu,
+};
+
 function ClothingRenderer({ clothingId, groupRef }: { clothingId: string; groupRef: React.RefObject<THREE.Group | null> }) {
   const item = findClothing(clothingId);
   if (!item || item.id === 'none') return null;
 
-  const texture = useMemo(() => createEmojiTexture(item.emoji), [item.emoji]);
-
-  useEffect(() => {
-    return () => { texture.dispose(); };
-  }, [texture]);
-
+  const Component = CLOTHING_COMPONENTS[item.id];
   const s = CLOTHING_SCALE[item.slot] ?? 0.6;
 
   return (
-    <group ref={groupRef}>
-      <sprite scale={[s, s, s]} renderOrder={10}>
-        <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
-      </sprite>
+    <group ref={groupRef} scale={[s, s, s]} renderOrder={10}>
+      {Component ? <Component /> : null}
     </group>
   );
 }
@@ -898,9 +1266,9 @@ const SlimeScene = ({
     });
   }, [preset.sparkleCount, slime.id, sparkle]);
 
-  const charmTexture = useMemo(() => {
+  const CharmComponent = useMemo(() => {
     if (!charm || charm.id === 'none') return null;
-    return createEmojiTexture(charm.emoji);
+    return CHARM_COMPONENTS[charm.id] ?? null;
   }, [charm]);
 
   const clothingItem = useMemo(() => findClothing(clothing), [clothing]);
@@ -1035,9 +1403,8 @@ const SlimeScene = ({
       burstGeometry.dispose();
       fragmentGeometry.dispose();
       megaFragGeometry.dispose();
-      if (charmTexture) charmTexture.dispose();
     };
-  }, [burstGeometry, charmTexture, geometry, innerGeometry, rimGeometry, fragmentGeometry, megaFragGeometry]);
+  }, [burstGeometry, geometry, innerGeometry, rimGeometry, fragmentGeometry, megaFragGeometry]);
 
   const cleanupMegaFragments = (): void => {
     const state = megaStateRef.current;
@@ -1527,7 +1894,6 @@ const SlimeScene = ({
   return (
     <>
       <color attach="background" args={['#140a2a']} />
-      <fog attach="fog" args={['#140a2a', 5.5, 10]} />
       <Environment preset="city" environmentIntensity={0.9} />
       <ambientLight intensity={0.38} />
       <directionalLight position={[2.6, 2.2, 2.5]} intensity={1.6} color="#fff3e0" />
@@ -1536,15 +1902,16 @@ const SlimeScene = ({
       <pointLight position={[-1.4, -0.8, 1.2]} intensity={0.6} color={baseColor} distance={3} />
 
       <ContactShadows
-        position={[0, -1.48, 0]}
-        opacity={0.55}
-        scale={4}
-        blur={2.8}
-        far={1.6}
-        resolution={512}
-        color="#000000"
+        position={[0, -1.44, 0]}
+        opacity={0.65}
+        scale={5}
+        blur={2.2}
+        far={2}
+        resolution={1024}
+        color="#050010"
       />
 
+      <group position={[0, -0.55, 0]} scale={[1.32, 0.88, 1.32]}>
 
       <mesh ref={shockwaveRef} position={[0, 0, 0.5]} visible={false}>
         <ringGeometry args={[0.8, 1, 64]} />
@@ -1616,11 +1983,9 @@ const SlimeScene = ({
           ))}
         </group>
 
-        {charmTexture && (
-          <group ref={charmGroupRef}>
-            <sprite scale={[0.5, 0.5, 0.5]} renderOrder={10}>
-              <spriteMaterial map={charmTexture} transparent depthWrite={false} depthTest={false} />
-            </sprite>
+        {CharmComponent && (
+          <group ref={charmGroupRef} scale={[0.6, 0.6, 0.6]} renderOrder={10}>
+            <CharmComponent />
           </group>
         )}
 
@@ -1636,6 +2001,7 @@ const SlimeScene = ({
         </mesh>
 
         <ClothingRenderer clothingId={clothing} groupRef={clothingGroupRef} />
+      </group>
       </group>
     </>
   );
@@ -1661,7 +2027,7 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
         <Canvas
           gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
           dpr={ULTRA_PRESET.dpr}
-          camera={{ fov: 42, near: 0.1, far: 100, position: [0, 0.12, 4.1] }}
+          camera={{ fov: 38, near: 0.1, far: 100, position: [0, 0.35, 3.4] }}
           style={{ background: 'transparent' }}
         >
           <SlimeScene
