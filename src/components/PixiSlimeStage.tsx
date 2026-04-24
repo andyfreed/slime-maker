@@ -1,5 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { MeshTransmissionMaterial } from '@react-three/drei';
+import {
+  Bloom,
+  ChromaticAberration,
+  DepthOfField,
+  EffectComposer,
+  Vignette,
+} from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
@@ -609,6 +617,90 @@ function ClothingRenderer({ clothingId, groupRef }: { clothingId: string; groupR
         <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
       </sprite>
     </group>
+  );
+}
+
+// ---- Subsurface-scattering inner-core material ----
+// Cheap SSS approximation: wrap lighting + back-translucency lobe + fresnel rim.
+// Rendered on an inner "core" mesh that sits behind the transmission shell so
+// refraction reads as light scattering through slime.
+
+const SSS_VERTEX = /* glsl */ `
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  void main() {
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vNormalW = normalize(mat3(modelMatrix) * normal);
+    vViewDir = normalize(cameraPosition - worldPos.xyz);
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
+  }
+`;
+
+const SSS_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform vec3 uLightDir;
+  uniform float uOpacity;
+  uniform float uTime;
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  void main() {
+    vec3 N = normalize(vNormalW);
+    vec3 V = normalize(vViewDir);
+    vec3 L = normalize(uLightDir);
+
+    float wrap = 0.55;
+    float lambert = max(0.0, (dot(N, L) + wrap) / (1.0 + wrap));
+
+    // Translucency: brighten where the view vector points back toward the light
+    float back = pow(max(0.0, dot(V, -L) * 0.5 + 0.5), 3.0);
+    float trans = back * 0.75;
+
+    float fresnel = pow(1.0 - max(0.0, dot(N, V)), 2.2);
+
+    float pulse = 0.05 * sin(uTime * 1.3);
+
+    vec3 col = uColor * (0.28 + lambert * 0.85);
+    col += uColor * (trans + pulse) * 1.3;
+    col += vec3(1.0) * fresnel * 0.22;
+
+    float alpha = uOpacity * (0.55 + 0.55 * fresnel + 0.4 * trans);
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
+  }
+`;
+
+function SlimeSSSMaterial({ color, opacity = 0.6 }: { color: THREE.Color | string; opacity?: number }) {
+  const ref = useRef<THREE.ShaderMaterial>(null);
+  const uniforms = useMemo(() => ({
+    uColor: { value: color instanceof THREE.Color ? color.clone() : new THREE.Color(color) },
+    uLightDir: { value: new THREE.Vector3(2.6, 2.2, 2.5).normalize() },
+    uOpacity: { value: opacity },
+    uTime: { value: 0 },
+  }), []);
+
+  useEffect(() => {
+    if (color instanceof THREE.Color) {
+      uniforms.uColor.value.copy(color);
+    } else {
+      uniforms.uColor.value.set(color);
+    }
+    uniforms.uOpacity.value = opacity;
+  }, [color, opacity, uniforms]);
+
+  useFrame((_, dt) => {
+    if (ref.current) {
+      (ref.current.uniforms.uTime.value as number) += dt;
+    }
+  });
+
+  return (
+    <shaderMaterial
+      ref={ref}
+      transparent
+      depthWrite={false}
+      uniforms={uniforms}
+      vertexShader={SSS_VERTEX}
+      fragmentShader={SSS_FRAGMENT}
+    />
   );
 }
 
@@ -1431,7 +1523,7 @@ const SlimeScene = ({
         </mesh>
 
         <mesh ref={innerRef} geometry={innerGeometry} position={[0, 0.05, -0.04]}>
-          <meshPhysicalMaterial color={innerColor} transparent opacity={0.18} roughness={0.28} metalness={0.04} clearcoat={0.5} clearcoatRoughness={0.25} />
+          <SlimeSSSMaterial color={innerColor} opacity={0.6} />
         </mesh>
 
         <group ref={sparkleRef}>
@@ -1499,6 +1591,30 @@ export const PixiSlimeStage = forwardRef<PixiSlimeStageHandle, PixiSlimeStagePro
             onInteract={onInteract}
             onReady={(controls) => { controlsRef.current = controls; }}
           />
+          <EffectComposer multisampling={4} enableNormalPass={false}>
+            <Bloom
+              intensity={0.55}
+              luminanceThreshold={0.62}
+              luminanceSmoothing={0.25}
+              mipmapBlur
+            />
+            <DepthOfField
+              focusDistance={0.015}
+              focalLength={0.04}
+              bokehScale={2}
+            />
+            <ChromaticAberration
+              offset={new THREE.Vector2(0.0008, 0.0008)}
+              blendFunction={BlendFunction.NORMAL}
+              radialModulation={false}
+              modulationOffset={0}
+            />
+            <Vignette
+              offset={0.3}
+              darkness={0.55}
+              blendFunction={BlendFunction.NORMAL}
+            />
+          </EffectComposer>
         </Canvas>
       </div>
     );
